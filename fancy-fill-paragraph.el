@@ -937,7 +937,8 @@ and re-adds the prefix to each output line."
         (save-excursion
           ;; Use `replace-region-contents' to minimize undo differences
           ;; compared with delete-region + insert.
-          (replace-region-contents beg end result))))))
+          ;; NOTE: when emacs 30.x is dropped, `result' can be passed in directly.
+          (replace-region-contents beg end (lambda () result)))))))
 
 
 ;; ---------------------------------------------------------------------------
