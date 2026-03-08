@@ -89,6 +89,13 @@ Each string is matched after optional leading blank-space.
 Set to nil to disable dot-point detection entirely."
   :type '(repeat string))
 
+(defcustom fancy-fill-paragraph-syntax-bounds t
+  "When non-nil, constrain paragraphs to syntax boundaries.
+In programming modes this treats each comment or string as a separate
+paragraph, preventing `fancy-fill-paragraph' from merging text across
+distinct comments or strings."
+  :type 'boolean)
+
 
 ;; ---------------------------------------------------------------------------
 ;; Private Helpers
@@ -101,7 +108,8 @@ Argument _POS is ignored."
 
 (defun fancy-fill-paragraph--join-string-sentence-end (_pos)
   "Return the join string for sentence-ending punctuation.
-Uses double space when `fancy-fill-paragraph-sentence-end-double-space' is non-nil.
+Uses double space when variable
+`fancy-fill-paragraph-sentence-end-double-space' is non-nil.
 Argument _POS is ignored."
   (declare (important-return-value t))
   (cond
@@ -162,6 +170,37 @@ Falls back to `string-trim-left' when LINE is shorter than N."
     (substring line n))
    (t
     (string-trim-left line))))
+
+
+;; ---------------------------------------------------------------------------
+;; Private Helpers (Syntax)
+
+(defsubst fancy-fill-paragraph--ppss-start (ppss)
+  "Return the start position of the innermost string or comment from PPSS.
+Extracts element 8 of the `syntax-ppss' result, which holds the
+character position of the start of the enclosing string or comment,
+or nil when outside both."
+  (declare (important-return-value t))
+  (nth 8 ppss))
+
+(defsubst fancy-fill-paragraph--syntax-string-delimiter-p (syn-descriptor)
+  "Return non-nil if SYN-DESCRIPTOR is a string delimiter.
+SYN-DESCRIPTOR may be nil, in which case nil is returned."
+  (declare (important-return-value t))
+  (and syn-descriptor
+       ;; Class 7: string-quote (e.g. \" in C).
+       ;; Class 15: string-fence (used by `python-mode' for triple-quoted strings).
+       (memq (syntax-class syn-descriptor) '(7 15))))
+
+(defsubst fancy-fill-paragraph--syntax-comment-end-class-p (syn-descriptor)
+  "Return non-nil if SYN-DESCRIPTOR indicates a `comment-end' character.
+SYN-DESCRIPTOR may be nil, in which case nil is returned."
+  (declare (important-return-value t))
+  (and syn-descriptor
+       ;; Class 12: comment-end (e.g. newline in Lisp).
+       ;; Bit 19: second character of a two-character comment ender (e.g. / in */).
+       (or (= (syntax-class syn-descriptor) 12)
+           (not (zerop (logand (car syn-descriptor) (ash 1 19)))))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -340,6 +379,170 @@ the first entry in the table takes priority.")
       (skip-chars-forward " \t\n")
       (setq beg (pos-bol))
       (cons beg end))))
+
+(defun fancy-fill-paragraph--syntax-body-bounds (beg end)
+  "Return body bounds between separate-line delimiters, or nil.
+BEG and END are the full region bounds (from `pos-bol' of the opener
+to `pos-eol' of the closer).  When the first and last lines contain
+only delimiters, return (BODY-BEG . BODY-END) for the lines between
+them.  Otherwise return nil, indicating inline delimiters."
+  (declare (important-return-value t))
+  (save-excursion
+    ;; End of the last body line (line before the closer).
+    (goto-char end)
+    (let ((body-end (pos-eol 0)))
+      (goto-char beg)
+      (when (and (zerop (forward-line 1))
+                 (> body-end (point)))
+        (cons (point) body-end)))))
+
+(defun fancy-fill-paragraph--syntax-comment-end-p ()
+  "Return non-nil if point follows a block comment closer.
+Newlines are excluded because they terminate line comments,
+not block comments."
+  (declare (important-return-value t))
+  (and (not (eq (char-before) ?\n))
+       (fancy-fill-paragraph--syntax-comment-end-class-p (syntax-after (1- (point))))))
+
+(defun fancy-fill-paragraph--syntax-regions (beg end pos)
+  "Return list of (BEG END FILL-FN) for each syntax region in BEG..END.
+POS is the cursor position, used to detect when point is inside a
+comment or string whose opener precedes BEG.
+Each entry spans from `pos-bol' of the opener to `pos-eol' of the closer.
+Block comments include the opener position as a fourth element.
+Line-style comments are skipped so they fall through to normal paragraph
+filling.  Returns nil when no syntax boundaries are found."
+  (declare (important-return-value t))
+  (save-excursion
+    ;; Ensure syntax properties are set for the entire region.
+    ;; Modes like `python-mode' rely on `syntax-propertize-function'
+    ;; to mark triple-quoted strings.
+    (syntax-propertize end)
+    (let ((regions nil))
+      (goto-char beg)
+      ;; If BEG or POS is inside a comment or string, retreat to
+      ;; its opener.  This handles the case where paragraph bounds
+      ;; extend beyond the syntax region (e.g. code surrounds the
+      ;; comment).
+      (let ((syn-start
+             (or (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss)))
+                 (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss pos))))))
+        (when syn-start
+          (goto-char syn-start)))
+      (while (< (point) end)
+        ;; Skip whitespace between regions.
+        (skip-chars-forward " \t\n" end)
+        (when (< (point) end)
+          (let ((region-line-beg (pos-bol))
+                (opener-pos (point)))
+            (cond
+             ;; Try advancing over a comment.
+             ((forward-comment 1)
+              (when (fancy-fill-paragraph--syntax-comment-end-p)
+                (push (list
+                       region-line-beg
+                       (pos-eol)
+                       #'fancy-fill-paragraph--fill-block-comment-region
+                       opener-pos)
+                      regions)))
+             ;; Not a comment; check for a string delimiter.
+             ((fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after (point)))
+              (condition-case nil
+                  (progn
+                    (forward-sexp 1)
+                    (push (list
+                           region-line-beg (pos-eol) #'fancy-fill-paragraph--fill-string-region)
+                          regions))
+                (scan-error
+                 (goto-char end))))
+             (t
+              ;; Neither comment nor string, stop scanning.
+              (goto-char end))))))
+      (nreverse regions))))
+
+(defun fancy-fill-paragraph--fill-block-comment-region (beg end comment-start-pos)
+  "Fill a block comment in the region BEG..END.
+COMMENT-START-POS is the buffer position of the comment opener.
+When the opener and closer occupy their own lines, fills only the body
+lines between them.  When they share lines with body text (inline),
+temporarily transforms the opener so all lines share the continuation
+prefix, fills, then restores the opener."
+  (save-excursion
+    (comment-normalize-vars)
+    (let* ((opener-col
+            (progn
+              (goto-char comment-start-pos)
+              (current-column)))
+           ;; Build the continuation prefix.
+           ;; Modes with `c-block-comment-prefix': use it (e.g. "* ").
+           ;; Other modes: use `comment-continue' when set by
+           ;; `comment-normalize-vars' (e.g. " * " for c-mode,
+           ;; "" for nxml-mode), otherwise derive from the opener text.
+           (cont-prefix
+            (concat
+             (make-string opener-col ?\s)
+             (cond
+              ((and (boundp 'c-block-comment-prefix)
+                    (stringp c-block-comment-prefix)
+                    (not (string-empty-p c-block-comment-prefix)))
+               (concat " " c-block-comment-prefix))
+              ((stringp comment-continue)
+               comment-continue)
+              (t
+               ;; Derive from the opener text: skip punctuation (".")
+               ;; and symbol ("_") characters after the comment-start
+               ;; character (e.g. "*" after "/" in "/*").
+               (concat
+                " "
+                (buffer-substring-no-properties
+                 (1+ comment-start-pos)
+                 (progn
+                   (goto-char (1+ comment-start-pos))
+                   (skip-syntax-forward "._")
+                   (point)))
+                " "))))))
+      (let ((body (fancy-fill-paragraph--syntax-body-bounds beg end)))
+        (cond
+         (body
+          ;; Delimiters on own lines - use the continuation prefix
+          ;; so dot-point detection works correctly.
+          (let ((fill-prefix cont-prefix))
+            (fancy-fill-paragraph--fill-region (car body) (cdr body))))
+         (t
+          ;; Inline delimiters - temporarily replace the comment-start
+          ;; character (e.g. "/" in "/*") with a space so the first
+          ;; line matches the continuation prefix, fill, then restore.
+          (let ((saved-char (char-after comment-start-pos)))
+            ;; Verify we are at a comment opener before modifying.
+            (unless (eq
+                     comment-start-pos
+                     (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss (1- end)))))
+              (error "Expected comment at %d, got `%c'" comment-start-pos saved-char))
+            (goto-char comment-start-pos)
+            (delete-char 1)
+            (insert ?\s)
+            (unwind-protect
+                (let ((fill-prefix cont-prefix))
+                  (fancy-fill-paragraph--fill-region beg end))
+              (goto-char comment-start-pos)
+              (delete-char 1)
+              (insert saved-char)))))))))
+
+(defun fancy-fill-paragraph--fill-string-region (beg end)
+  "Fill a string in the region BEG..END.
+When the delimiters occupy their own lines, fills only the body text
+between them.  When the delimiters share lines with body text (inline
+delimiters), fills the entire region, treating the delimiters as part
+of the text."
+  (let ((body (fancy-fill-paragraph--syntax-body-bounds beg end)))
+    (cond
+     (body
+      ;; Delimiters on own lines - fill the body between them.
+      (fancy-fill-paragraph--fill-region (car body) (cdr body)))
+     (t
+      ;; Inline delimiters - fill the entire region.
+      (fancy-fill-paragraph--fill-region beg end)))))
+
 
 (defun fancy-fill-paragraph--paragraph-to-items (text)
   "Split TEXT into items at weighted punctuation boundaries.
@@ -987,8 +1190,18 @@ Breaks lines preferring sentence boundaries."
    (t
     (let* ((bounds (fancy-fill-paragraph--paragraph-bounds))
            (beg (car bounds))
-           (end (cdr bounds)))
-      (fancy-fill-paragraph--fill-region beg end)))))
+           (end (cdr bounds))
+           (sub-regions
+            (when fancy-fill-paragraph-syntax-bounds
+              (fancy-fill-paragraph--syntax-regions beg end (point)))))
+      (cond
+       (sub-regions
+        ;; Fill each region independently, in reverse order so
+        ;; earlier positions remain valid after later fills.
+        (dolist (region (reverse sub-regions))
+          (apply (nth 2 region) (nth 0 region) (nth 1 region) (nthcdr 3 region))))
+       (t
+        (fancy-fill-paragraph--fill-region beg end)))))))
 
 (provide 'fancy-fill-paragraph)
 ;; Local Variables:
