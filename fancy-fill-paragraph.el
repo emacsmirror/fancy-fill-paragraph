@@ -366,6 +366,36 @@ the first entry in the table takes priority.")
 ;; ---------------------------------------------------------------------------
 ;; Private Functions
 
+(defun fancy-fill-paragraph--fill-paragraphs-in-string
+    (text local-fill-column &optional prefix-stripped)
+  "Fill each paragraph in TEXT independently within LOCAL-FILL-COLUMN.
+Paragraphs are separated by blank lines.  Returns the filled text
+with paragraph separators preserved.
+When PREFIX-STRIPPED is non-nil, set `fill-prefix' to the empty string
+so `fill-context-prefix' detection is suppressed (the caller already
+removed the prefix from TEXT)."
+  (declare (important-return-value t))
+  (with-temp-buffer
+    (insert text)
+    (let ((fill-column local-fill-column)
+          (fill-prefix
+           (when prefix-stripped
+             "")))
+      (let ((bounds nil))
+        (goto-char (point-min))
+        (while (progn
+                 (skip-chars-forward " \t\n" (point-max))
+                 (< (point) (point-max)))
+          (let ((para-beg (pos-bol)))
+            (forward-paragraph 1)
+            (let ((resume (point)))
+              (skip-chars-backward " \t\n" para-beg)
+              (push (cons para-beg (pos-eol)) bounds)
+              (goto-char resume))))
+        (dolist (para-bounds bounds)
+          (fancy-fill-paragraph--fill-region (car para-bounds) (cdr para-bounds)))))
+    (buffer-string)))
+
 (defun fancy-fill-paragraph--paragraph-bounds ()
   "Return (BEG . END) of the current paragraph."
   (declare (important-return-value t))
@@ -392,8 +422,7 @@ them.  Otherwise return nil, indicating inline delimiters."
     (goto-char end)
     (let ((body-end (pos-eol 0)))
       (goto-char beg)
-      (when (and (zerop (forward-line 1))
-                 (> body-end (point)))
+      (when (and (zerop (forward-line 1)) (> body-end (point)))
         (cons (point) body-end)))))
 
 (defun fancy-fill-paragraph--syntax-comment-end-p ()
@@ -504,10 +533,67 @@ prefix, fills, then restores the opener."
       (let ((body (fancy-fill-paragraph--syntax-body-bounds beg end)))
         (cond
          (body
-          ;; Delimiters on own lines - use the continuation prefix
-          ;; so dot-point detection works correctly.
-          (let ((fill-prefix cont-prefix))
-            (fancy-fill-paragraph--fill-region (car body) (cdr body))))
+          ;; Delimiters on own lines.
+          ;; Check if all body lines match the continuation prefix,
+          ;; accepting blank prefix lines (e.g. " *" for prefix " * ").
+          ;; When they do, fill in a temporary buffer where blank comment
+          ;; lines become real blank lines, so `forward-paragraph'
+          ;; naturally separates sub-paragraphs.
+          ;; When they don't (e.g. XML comments with no continuation
+          ;; prefix), fall back to standard single-paragraph fill.
+          (let* ((body-beg (car body))
+                 (body-end (cdr body))
+                 (prefix-matches
+                  (save-excursion
+                    (goto-char body-beg)
+                    (let ((all-match t))
+                      (while (and all-match (<= (point) body-end))
+                        (let ((line (buffer-substring-no-properties (point) (pos-eol))))
+                          (unless (string-prefix-p cont-prefix (concat line " "))
+                            (setq all-match nil)))
+                        (forward-line 1))
+                      all-match))))
+            (cond
+             (prefix-matches
+              (let* ((prefix-col
+                      (save-excursion
+                        (goto-char body-beg)
+                        (goto-char (min (+ body-beg (length cont-prefix)) (pos-eol)))
+                        (current-column)))
+                     ;; Collect body lines, stripping the continuation prefix.
+                     ;; Blank comment lines (shorter than the prefix) become "".
+                     (lines
+                      (save-excursion
+                        (goto-char body-beg)
+                        (let ((result nil))
+                          (while (<= (point) body-end)
+                            (move-to-column prefix-col)
+                            (push (buffer-substring-no-properties (point) (pos-eol)) result)
+                            (forward-line 1))
+                          (nreverse result))))
+                     (stripped-text (mapconcat #'identity lines "\n"))
+                     (local-fill-column (max 1 (- fill-column prefix-col)))
+                     (filled-text
+                      (fancy-fill-paragraph--fill-paragraphs-in-string
+                       stripped-text local-fill-column
+                       t))
+                     ;; Re-add continuation prefix to each line.
+                     (prefix-trimmed (string-trim-right cont-prefix))
+                     (result
+                      (mapconcat (lambda (line)
+                                   (cond
+                                    ((string-empty-p line)
+                                     prefix-trimmed)
+                                    (t
+                                     (concat cont-prefix line))))
+                                 (split-string filled-text "\n")
+                                 "\n")))
+                (save-excursion (replace-region-contents body-beg body-end (lambda () result)))))
+             (t
+              ;; Prefix doesn't match body lines (e.g. XML comments),
+              ;; fall back to standard fill.
+              (let ((fill-prefix cont-prefix))
+                (fancy-fill-paragraph--fill-region body-beg body-end))))))
          (t
           ;; Inline delimiters - temporarily replace the comment-start
           ;; character (e.g. "/" in "/*") with a space so the first
@@ -537,8 +623,12 @@ of the text."
   (let ((body (fancy-fill-paragraph--syntax-body-bounds beg end)))
     (cond
      (body
-      ;; Delimiters on own lines - fill the body between them.
-      (fancy-fill-paragraph--fill-region (car body) (cdr body)))
+      ;; Delimiters on own lines - fill each paragraph independently.
+      (let* ((body-beg (car body))
+             (body-end (cdr body))
+             (body-text (buffer-substring-no-properties body-beg body-end))
+             (filled-text (fancy-fill-paragraph--fill-paragraphs-in-string body-text fill-column)))
+        (save-excursion (replace-region-contents body-beg body-end (lambda () filled-text)))))
      (t
       ;; Inline delimiters - fill the entire region.
       (fancy-fill-paragraph--fill-region beg end)))))
@@ -1198,8 +1288,12 @@ Breaks lines preferring sentence boundaries."
        (sub-regions
         ;; Fill each region independently, in reverse order so
         ;; earlier positions remain valid after later fills.
-        (dolist (region (reverse sub-regions))
-          (apply (nth 2 region) (nth 0 region) (nth 1 region) (nthcdr 3 region))))
+        ;; Save point as an integer since `replace-region-contents'
+        ;; can displace `save-excursion' markers inside fill functions.
+        (let ((saved-point (point)))
+          (dolist (region (reverse sub-regions))
+            (apply (nth 2 region) (nth 0 region) (nth 1 region) (nthcdr 3 region)))
+          (goto-char saved-point)))
        (t
         (fancy-fill-paragraph--fill-region beg end)))))))
 

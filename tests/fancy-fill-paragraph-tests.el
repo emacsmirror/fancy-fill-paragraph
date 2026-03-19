@@ -2344,6 +2344,34 @@
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-strings-multi-paragraph ()
+  "Python triple-quoted string with blank line should preserve separate paragraphs."
+  (let ((fill-column 80)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    \"\"\"\n"
+          "    Generic Class,\n"
+          "    can be used for any toolbar.\n"
+          "\n"
+          "    AB.\n"
+          "    \"\"\""))
+        (text-expected
+         (concat
+          "    \"\"\"\n"
+          "    Generic Class, can be used for any toolbar.\n"
+          "\n"
+          "    AB.\n"
+          "    \"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (+ (point-min) 10))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-python-comments-wrap ()
   "Two Python comment paragraphs separated by a blank line should each wrap independently."
   (let ((fill-column 40)
@@ -2521,6 +2549,51 @@
         (goto-char (point-min))
         (fancy-fill-paragraph)
         (goto-char (point-max))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-multi-paragraph ()
+  "C-mode block comment with blank `*' lines should preserve separate paragraphs."
+  (let ((fill-column 80)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    /* Refresh so the block is recreated with the region visible.\n"
+          "     *\n"
+          "     * Without this, `block_begin` sets #BLOCK_LOOP before the region is shown,\n"
+          "     * causing `template_popup_confirm` to skip attaching its close callback\n"
+          "     * (since it assumes #BLOCK_LOOP menus close via `menuretval`).\n"
+          "     * With #BLOCK_KEEP_OPEN set this doesn't happen.\n"
+          "     *\n"
+          "     * An alternative would be to ensure the popup state always matches\n"
+          "     * the initial state, however this ends up involving assumptions\n"
+          "     * which may not hold in *every* case,\n"
+          "     * so triggering a refresh is a reasonable solution.\n"
+          "     * A refresh also occurs when moving the cursor between buttons,\n"
+          "     * so it's expected\n"
+          "     * to be fast. see #155320.\n"
+          "     */"))
+        (text-expected
+         (concat
+          "    /* Refresh so the block is recreated with the region visible.\n"
+          "     *\n"
+          "     * Without this, `block_begin` sets #BLOCK_LOOP before the region is shown,\n"
+          "     * causing `template_popup_confirm` to skip attaching its close callback\n"
+          "     * (since it assumes #BLOCK_LOOP menus close via `menuretval`).\n"
+          "     * With #BLOCK_KEEP_OPEN set this doesn't happen.\n"
+          "     *\n"
+          "     * An alternative would be to ensure the popup state always matches the\n"
+          "     * initial state, however this ends up involving assumptions which may not\n"
+          "     * hold in *every* case, so triggering a refresh is a reasonable solution.\n"
+          "     * A refresh also occurs when moving the cursor between buttons,\n"
+          "     * so it's expected to be fast. see #155320.\n"
+          "     */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (+ (point-min) 6))
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
