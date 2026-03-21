@@ -2667,6 +2667,104 @@
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-c-mode-javadoc-inline-wrap ()
+  "C-mode Javadoc inline comment with `/**' opener should preserve the opener."
+  (let ((fill-column 72)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/** AAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          " CCCCCCCCCCCCCCCCCCCCCCCCCCC DDDDDDDDDDDDDDDDDDDDDDDDD"
+          " EEEEEEEEEEEEEEEEEEE.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/** AAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
+          " * CCCCCCCCCCCCCCCCCCCCCCCCCCC DDDDDDDDDDDDDDDDDDDDDDDDD\n"
+          " * EEEEEEEEEEEEEEEEEEE.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (+ (point-min) 5))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-star-dot-points ()
+  "C-mode block comment with `*' dot-point list should fill each item independently."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/*\n"
+          " * Overview of the algorithm:\n"
+          " *\n"
+          " * * Alpha bravo charlie\n"
+          " *   delta echo foxtrot\n"
+          " *   golf hotel india.\n"
+          " * * Juliet kilo lima mike\n"
+          " *   november oscar papa\n"
+          " *   quebec romeo sierra.\n"
+          " * * Tango uniform victor\n"
+          " *   whiskey xray yankee\n"
+          " *   zulu.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/*\n"
+          " * Overview of the algorithm:\n"
+          " *\n"
+          " * * Alpha bravo charlie delta echo foxtrot golf\n"
+          " *   hotel india.\n"
+          " * * Juliet kilo lima mike november oscar papa\n"
+          " *   quebec romeo sierra.\n"
+          " * * Tango uniform victor whiskey xray yankee\n"
+          " *   zulu.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (+ (point-min) 5))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-dash-prefix ()
+  "C-mode block comment with alternative `c-block-comment-prefix' set to dash."
+  (let ((fill-column 40)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/*\n"
+          " - Alpha bravo charlie delta echo foxtrot golf hotel.\n"
+          " -\n"
+          " - - Juliet kilo lima mike november oscar papa quebec.\n"
+          " - - Romeo sierra tango uniform victor whiskey xray.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/*\n"
+          " - Alpha bravo charlie delta echo\n"
+          " - foxtrot golf hotel.\n"
+          " -\n"
+          " - - Juliet kilo lima mike november\n"
+          " -   oscar papa quebec.\n"
+          " - - Romeo sierra tango uniform victor\n"
+          " -   whiskey xray.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t)
+            (c-block-comment-prefix "- "))
+        (buffer-reset-text text-initial)
+        (goto-char (+ (point-min) 5))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 ;; Local Variables:
 ;; fill-column: 99
 ;; indent-tabs-mode: nil
