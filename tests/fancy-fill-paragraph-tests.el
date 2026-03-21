@@ -306,7 +306,7 @@
                  "world."))
         (fancy-fill-paragraph-infix-delimiters '(("-" . 50)))
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 10)))))
 
 (ert-deftest split-paren-active ()
@@ -397,7 +397,7 @@
   (let ((text-initial "Hello.")
         (text-expected "Hello.")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-two-items-fit-one-line ()
@@ -405,7 +405,7 @@
   (let ((text-initial "A. B.")
         (text-expected "A. B.")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-two-items-need-two-lines ()
@@ -416,7 +416,7 @@
          (concat "Hello world.\n"
                  "Foo bar."))
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 15)))))
 
 (ert-deftest solve-double-space-separator ()
@@ -424,7 +424,7 @@
   (let ((text-initial "A. B.")
         (text-expected "A.  B.")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-single-space-separator ()
@@ -432,7 +432,7 @@
   (let ((text-initial "A. B.")
         (text-expected "A. B.")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-comma-single-space ()
@@ -440,7 +440,7 @@
   (let ((text-initial "Hello, world.")
         (text-expected "Hello, world.")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 50 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-prefer-period-break ()
@@ -451,7 +451,7 @@
          (concat "Hello, world.\n"
                  "Foo, bar."))
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 30 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 20)))))
 
 (ert-deftest solve-oversized-single-item ()
@@ -459,7 +459,7 @@
   (let ((text-initial "This is a very long sentence that exceeds the fill column.")
         (text-expected "This is a very long sentence that exceeds the fill column.")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 20)))))
 
 (ert-deftest solve-optimal-three-way-split ()
@@ -470,7 +470,7 @@
          (concat "Alpha beta. Gamma.\n"
                  "Delta epsilon."))
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     ;; "Alpha beta." (11) + " " + "Gamma." (6) = 18, fits in 20.
     ;; "Delta epsilon." (14) on next line, fits in 20.
@@ -484,7 +484,7 @@
          (concat "Alpha.\n"
                  "Beta."))
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     ;; "Alpha." (6) + "  " (2) + "Beta." (5) = 13, exceeds fill-col 12.
     ;; Must split onto two lines.
     (should (equal text-expected (test-split-and-solve text-initial 12)))))
@@ -499,7 +499,7 @@
         (text-expected "Hello world. Foo bar.")
         (fill-column 80)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -513,7 +513,7 @@
                  "Foo bar."))
         (fill-column 20)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -530,7 +530,7 @@
                  "Baz qux."))
         (fill-column 25)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -542,7 +542,7 @@
         (text-expected "Hello world.  Foo bar.")
         (fill-column 80)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -553,7 +553,7 @@
         (text-expected "Hello world. Foo bar.")
         (fill-column 80)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -564,7 +564,7 @@
         (text-expected "Hello, world. Foo, bar.")
         (fill-column 80)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -578,7 +578,7 @@
                  "foo."))
         (fill-column 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 50 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -589,7 +589,7 @@
         (text-expected "Hello world. Foo bar.")
         (fill-column 80)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -606,7 +606,7 @@
          (concat "A.\n"
                  "B."))
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 0))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
@@ -615,7 +615,7 @@
   (let ((text-initial "A. B. C.")
         (text-expected "A. B. C.")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
@@ -628,7 +628,7 @@
                  "Foo bar."))
         (fill-column 80)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 0))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -662,7 +662,7 @@
                  "exceeds the fill\n"
                  "column."))
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 20)))))
 
 (ert-deftest solve-space-prefers-delimiter-break ()
@@ -673,7 +673,7 @@
          (concat "Hello world.\n"
                  "Foo bar."))
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 15)))))
 
 
@@ -689,7 +689,7 @@
                  "(world)\n"
                  "end."))
         (fancy-fill-paragraph-split-weights (list :period 100 :paren 25 :open-paren 5 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 10)))))
 
 
@@ -705,7 +705,7 @@
                  "then left."))
         (fancy-fill-paragraph-split-weights
          (list :period 100 :double-quote 25 :open-double-quote 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 16)))))
 
 (ert-deftest solve-open-quote-avoids-line-end ()
@@ -718,7 +718,7 @@
                  "end."))
         (fancy-fill-paragraph-split-weights
          (list :period 100 :double-quote 25 :open-double-quote 5 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (should (equal text-expected (test-split-and-solve text-initial 10)))))
 
 (ert-deftest solve-closing-quote-sentence-end-double-space ()
@@ -727,7 +727,7 @@
         (text-expected "She said \"hello.\"  He replied.")
         (fancy-fill-paragraph-split-weights
          (list :period 100 :double-quote 25 :open-double-quote 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-closing-quote-mid-sentence-no-double-space ()
@@ -736,7 +736,7 @@
         (text-expected "The value \"None\" is returned.")
         (fancy-fill-paragraph-split-weights
          (list :period 100 :double-quote 25 :open-double-quote 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-closing-paren-sentence-end-double-space ()
@@ -744,7 +744,7 @@
   (let ((text-initial "(See above.) The next.")
         (text-expected "(See above.)  The next.")
         (fancy-fill-paragraph-split-weights (list :period 100 :paren 25 :open-paren 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-closing-bracket-sentence-end-double-space ()
@@ -753,7 +753,7 @@
         (text-expected "[See above.]  The next.")
         (fancy-fill-paragraph-split-weights
          (list :period 100 :bracket 25 :open-bracket 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-closing-brace-sentence-end-double-space ()
@@ -761,7 +761,7 @@
   (let ((text-initial "{See above.} The next.")
         (text-expected "{See above.}  The next.")
         (fancy-fill-paragraph-split-weights (list :period 100 :brace 25 :open-brace 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-question-mark-quote-double-space ()
@@ -770,7 +770,7 @@
         (text-expected "She asked \"why?\"  He shrugged.")
         (fancy-fill-paragraph-split-weights
          (list :period 100 :question 100 :double-quote 25 :open-double-quote 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-exclamation-quote-double-space ()
@@ -779,7 +779,7 @@
         (text-expected "He yelled \"stop!\"  She froze.")
         (fancy-fill-paragraph-split-weights
          (list :period 100 :exclamation 100 :double-quote 25 :open-double-quote 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-ellipsis-quote-double-space ()
@@ -788,7 +788,7 @@
         (text-expected "She said \"well\u2026\"  He waited.")
         (fancy-fill-paragraph-split-weights
          (list :period 100 :ellipsis 100 :double-quote 25 :open-double-quote 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-comma-after-period-no-double-space ()
@@ -796,7 +796,7 @@
   (let ((text-initial "Use etc., not etcetera.")
         (text-expected "Use etc., not etcetera.")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 25 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-semicolon-after-period-no-double-space ()
@@ -804,7 +804,7 @@
   (let ((text-initial "Use etc.; not etcetera.")
         (text-expected "Use etc.; not etcetera.")
         (fancy-fill-paragraph-split-weights (list :period 100 :semicolon 25 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 (ert-deftest solve-colon-after-period-no-double-space ()
@@ -812,7 +812,7 @@
   (let ((text-initial "See etc.: the list.")
         (text-expected "See etc.: the list.")
         (fancy-fill-paragraph-split-weights (list :period 100 :colon 25 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
 
@@ -835,7 +835,7 @@
                  "Alpha beta."))
         (fill-column 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (transient-mark-mode 1)
       (push-mark (point-min) t t)
@@ -857,7 +857,7 @@
                  "Also short."))
         (fill-column 80)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (transient-mark-mode 1)
       (push-mark (point-min) t t)
@@ -886,7 +886,7 @@
                  "Theta."))
         (fill-column 12)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (transient-mark-mode 1)
       (push-mark (point-min) t t)
@@ -912,7 +912,7 @@
                  "Alpha beta."))
         (fill-column 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (transient-mark-mode 1)
       (push-mark (point-min) t t)
@@ -936,7 +936,7 @@
                  "    Foo bar. Baz qux."))
         (fill-column 22)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -954,7 +954,7 @@
                  ";; Foo bar. Baz qux."))
         (fill-column 21)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (with-fancy-fill-paragraph-test text-initial
       (emacs-lisp-mode)
@@ -974,7 +974,7 @@
         (fill-column 20)
         (fill-prefix "# ")
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -991,7 +991,7 @@
                  "        B."))
         (fill-column 12)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     ;; Prefix "        " (8 chars) leaves 4 columns.
     ;; "A." (2) + " " (1) + "B." (2) = 5, exceeds 4. Must split.
     (with-fancy-fill-paragraph-test text-initial
@@ -1015,7 +1015,7 @@
           "Golf hotel india."))
         (fill-column 30)
         (fill-prefix "   ")
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1034,7 +1034,7 @@
           "  prefix that should not be propagated\n"
           "  to every line."))
         (fill-column 40)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1063,7 +1063,7 @@
           "we had nothing before us, we were all going direct to Heaven,\n"
           "we were all going direct the other way."))
         (fill-column 70)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1089,7 +1089,7 @@
                  "  india"))
         (fill-column 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1109,7 +1109,7 @@
                  "   hotel"))
         (fill-column 22)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75)
         (fancy-fill-paragraph-dot-point-prefix (list "- " ">> ")))
     (with-fancy-fill-paragraph-test text-initial
@@ -1131,7 +1131,7 @@
                  "- Golf hotel"))
         (fill-column 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1157,7 +1157,7 @@
                  "  lima"))
         (fill-column 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1179,7 +1179,7 @@
                  "  kilo lima"))
         (fill-column 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1201,7 +1201,7 @@
                  "- Delta echo"))
         (fill-column 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1233,7 +1233,7 @@
                  "  uniform"))
         (fill-column 20)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1263,7 +1263,7 @@
                  "- Sierra tango"))
         (fill-column 20)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1293,7 +1293,7 @@
                  "    sierra tango"))
         (fill-column 20)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1321,7 +1321,7 @@
                  "- Hotel india"))
         (fill-column 20)
         (fancy-fill-paragraph-split-weights (list :period 100 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 75))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1370,7 +1370,7 @@
           "  The remaining 30% is devoted to eating, grooming, and ignoring their\n"
           "  owners \u2014 a well-documented phenomenon (see Johnson et al. 2023)."))
         (fill-column 70)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1420,7 +1420,7 @@
           "    grooming, and ignoring their owners \u2014\n"
           "    a well-documented phenomenon (see Johnson et al. 2023)."))
         (fill-column 70)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1452,7 +1452,7 @@
           "  so code after this call never runs when it's invoked.\n"
           "- All the `--debug-*` flags."))
         (fill-column 70)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1477,7 +1477,7 @@
                  "      Juliet kilo.\n"
                  "   Lima mike."))
         (fill-column 30)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1509,7 +1509,7 @@
                  "   Sierra tango uniform\n"
                  "   victor whiskey xray."))
         (fill-column 26)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1573,7 +1573,7 @@
          "Final integration testing verifies all layers function\n"
          "together correctly."))
        (fill-column 60)
-       (fancy-fill-paragraph-sentence-end-double-space nil))
+       (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1590,7 +1590,7 @@
           "Quebec one - romeo two - sierra three - tango four"
           " - uniform five - victor six - whiskey seven - xray eight."))
         (fill-column 30)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       ;; Fill with short column.
       (fancy-fill-paragraph)
@@ -1661,7 +1661,7 @@
          "   - Query indexes are maintained to optimize the most frequent access patterns.\n"
          "Final integration testing verifies all layers function together correctly."))
        (fill-column 1000)
-       (fancy-fill-paragraph-sentence-end-double-space nil))
+       (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1680,7 +1680,7 @@
         (fill-column 30)
         (fancy-fill-paragraph-fill-column-margin 5)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1698,7 +1698,7 @@
         (fill-column 60)
         (fancy-fill-paragraph-fill-column-target -20)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1719,7 +1719,7 @@
           "   - Authorization checks role-based access control permissions.\n"
           "Final integration testing verifies all layers function together."))
         (fill-column 55)
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (let ((first-fill (buffer-string)))
@@ -1740,7 +1740,7 @@
           " - echo five - foxtrot six - golf seven - hotel eight."))
         (fill-column 30)
         (fancy-fill-paragraph-infix-delimiters nil)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1796,7 +1796,7 @@
         (fill-column 50)
         (fancy-fill-paragraph-fill-column-target 0.5)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1812,7 +1812,7 @@
         (fill-column 55)
         (fancy-fill-paragraph-fill-column-target 25)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-blank-space-weight 100))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
@@ -1833,7 +1833,7 @@
         (tab-width 4)
         (fill-column 30)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1852,7 +1852,7 @@
         (fill-column 10)
         (fancy-fill-paragraph-fill-column-margin 15)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1887,7 +1887,7 @@
                  "Charlie delta."))
         (fill-column 27)
         (fancy-fill-paragraph-split-weights (list :period 100 :comma 0 :space 0))
-        (fancy-fill-paragraph-sentence-end-double-space t))
+        (sentence-end-double-space t))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1913,7 +1913,7 @@
         (fill-column 22)
         (fancy-fill-paragraph-dot-point-prefix (list "* "))
         (fancy-fill-paragraph-split-weights (list :period 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1932,7 +1932,7 @@
                  "end."))
         (fill-column 20)
         (fancy-fill-paragraph-split-weights (list :period 0 :space 1))
-        (fancy-fill-paragraph-sentence-end-double-space nil))
+        (sentence-end-double-space nil))
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
@@ -1945,7 +1945,7 @@
   "Three separate C-style comments should each wrap independently."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/* Alpha bravo charlie delta echo foxtrot golf. */\n"
@@ -1972,7 +1972,7 @@
   "Three separate wrapped C-style comments should each unwrap independently."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/* Alpha bravo charlie delta\n"
@@ -1998,7 +1998,7 @@
   "Three multi-line C-style comments with delimiters on own lines should each wrap."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/*\n"
@@ -2036,7 +2036,7 @@
   "Three multi-line C-style comments with delimiters on own lines should each unwrap."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/*\n"
@@ -2074,7 +2074,7 @@
   "Indented C block comment with dot-points should wrap preserving dot-point structure."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "void func() {\n"
@@ -2118,7 +2118,7 @@
   "Indented C block comment with dot-points should unwrap preserving dot-point structure."
   (let ((fill-column 120)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "void func() {\n"
@@ -2162,7 +2162,7 @@
   "Three inline XML comments should each wrap independently."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "<!-- Alpha bravo charlie delta echo foxtrot golf. -->\n"
@@ -2188,7 +2188,7 @@
   "Three inline wrapped XML comments should each unwrap independently."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "<!-- Alpha bravo charlie\n"
@@ -2214,7 +2214,7 @@
   "Three multi-line XML comments with delimiters on own lines should each wrap."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "<!--\n"
@@ -2252,7 +2252,7 @@
   "Three multi-line XML comments with delimiters on own lines should each unwrap."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "<!--\n"
@@ -2290,7 +2290,7 @@
   "Three triple-single-quoted Python strings should each wrap independently."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "'''\n"
@@ -2328,7 +2328,7 @@
   "Three triple-double-quoted Python strings should each unwrap independently."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "\"\"\"\n"
@@ -2366,7 +2366,7 @@
   "Three inline triple-single-quoted Python strings should each wrap independently."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "'''Alpha bravo charlie delta echo foxtrot golf.'''\n"
@@ -2392,7 +2392,7 @@
   "Three inline triple-double-quoted Python strings should each unwrap independently."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "\"\"\"Alpha bravo charlie delta\n"
@@ -2418,7 +2418,7 @@
   "Python triple-quoted string with blank line should preserve separate paragraphs."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "    \"\"\"\n"
@@ -2446,7 +2446,7 @@
   "Two Python comment paragraphs separated by a blank line should each wrap independently."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "# Alpha bravo charlie delta echo foxtrot golf.\n"
@@ -2477,7 +2477,7 @@
   "Two wrapped Python comment paragraphs separated by a blank line should each unwrap independently."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "# Alpha bravo charlie\n"
@@ -2510,7 +2510,7 @@
   "C-mode inline block comments should wrap using `comment-continue'."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/* Alpha bravo charlie delta echo foxtrot golf. */\n"
@@ -2536,7 +2536,7 @@
   "C-mode inline wrapped block comments should unwrap using `comment-continue'."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/* Alpha bravo charlie delta\n"
@@ -2562,7 +2562,7 @@
   "Emacs Lisp semicolon comments should pass through to normal fill."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           ";; Alpha bravo charlie delta echo foxtrot golf.\n"
@@ -2593,7 +2593,7 @@
   "Wrapped Emacs Lisp semicolon comments should pass through to normal unwrap."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           ";; Alpha bravo charlie\n"
@@ -2626,7 +2626,7 @@
   "C-mode Javadoc inline comment with `/**' opener should preserve the opener."
   (let ((fill-column 72)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/** AAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBB"
@@ -2651,7 +2651,7 @@
   "C-mode block comment with `*' dot-point list should fill each item independently."
   (let ((fill-column 50)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/*\n"
@@ -2691,7 +2691,7 @@
   "C-mode block comment with alternative `c-block-comment-prefix' set to dash."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "/*\n"
@@ -2724,7 +2724,7 @@
   "C-mode block comment with blank `*' lines should preserve separate paragraphs."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (text-initial
          (concat
           "    /* Refresh so the block is recreated with the region visible.\n"
@@ -2768,7 +2768,7 @@
 (ert-deftest fill-markdown-numbered-list ()
   "Markdown numbered list with multi-digit numbers should fill each item independently."
   (let ((fill-column 40)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-dot-point-prefix (list "- " '(:regexp . "[0-9]+\\. ")))
         (text-initial
          (concat
@@ -2795,7 +2795,7 @@
   ;; "1. " = 3 chars (sub-fc 69), "10000000000000000000000000000000000. " = 37 chars (sub-fc 35).
   ;; Alternating prefix widths verify each item computes its own continuation indent.
   (let ((fill-column 72)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-dot-point-prefix (list '(:regexp . "[0-9]+\\. ")))
         (text-initial
          (concat
@@ -2831,7 +2831,7 @@
   "Numbered list inside a C block comment should fill each item independently."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-dot-point-prefix (list "- " '(:regexp . "[0-9]+\\. ")))
         (text-initial
          (concat
@@ -2862,7 +2862,7 @@
 (ert-deftest fill-mixed-literal-and-regexp-dot-points ()
   "Literal `- ' and regexp numbered dot-points in the same text."
   (let ((fill-column 40)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-dot-point-prefix (list "- " '(:regexp . "[0-9]+\\. ")))
         (text-initial
          (concat
@@ -2882,7 +2882,7 @@
 (ert-deftest fill-regexp-dot-point-no-match-without-space ()
   "Text like `1.noSpace' should not match the numbered list regexp."
   (let ((fill-column 30)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (sentence-end-double-space nil)
         (fancy-fill-paragraph-dot-point-prefix (list '(:regexp . "[0-9]+\\. ")))
         (text-initial "1.noSpace should not match and 2.this also not.")
         (text-expected
