@@ -55,6 +55,76 @@
 
 
 ;; ---------------------------------------------------------------------------
+;; NOOP Tests (degenerate inputs)
+
+(ert-deftest fill-noop-empty-buffer ()
+  "Empty buffer should be unchanged."
+  (with-fancy-fill-paragraph-test ""
+    (fancy-fill-paragraph)
+    (should (equal "" (buffer-string)))))
+
+(ert-deftest fill-noop-single-space ()
+  "Single space should be unchanged."
+  (with-fancy-fill-paragraph-test " "
+    (fancy-fill-paragraph)
+    (should (equal " " (buffer-string)))))
+
+(ert-deftest fill-noop-blank-lines ()
+  "Blank lines should be unchanged."
+  (with-fancy-fill-paragraph-test "\n\n\n"
+    (fancy-fill-paragraph)
+    (should (equal "\n\n\n" (buffer-string)))))
+
+(ert-deftest fill-noop-c-mode-empty-comment ()
+  "Empty C block comment should be unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (text "/*\n */"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char (+ (point-min) 3))
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-noop-c-mode-blank-comment ()
+  "C block comment with only blank `*' line should be unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (text "/*\n *\n */"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char (+ (point-min) 3))
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-noop-python-empty-string ()
+  "Empty Python triple-quoted string should be unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (text "\"\"\"\n\"\"\""))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char (+ (point-min) 4))
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-noop-python-blank-string ()
+  "Python triple-quoted string with only blank line should be unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (text "\"\"\"\n\n\"\"\""))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char (+ (point-min) 4))
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+
+;; ---------------------------------------------------------------------------
 ;; Split Tests
 
 (ert-deftest split-single-sentence ()
