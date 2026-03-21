@@ -137,10 +137,16 @@ Customization
    spaces on both sides.  For example "-" matches " - " in the text.
    WEIGHT is an integer from 0 to 100 (see ``fancy-fill-paragraph-split-weights``).
 
-``fancy-fill-paragraph-dot-point-prefix``: ``("- ")``
+``fancy-fill-paragraph-dot-point-prefix``: ``("- " "* ")``
    List of dot-point prefix strings to detect.
    Each string is matched after optional leading blank-space.
    Set to nil to disable dot-point detection entirely.
+
+``fancy-fill-paragraph-syntax-bounds``: ``t``
+   When non-nil, constrain paragraphs to syntax boundaries.
+   In programming modes this treats each comment or string as a separate
+   paragraph, preventing ``fancy-fill-paragraph`` from merging text across
+   distinct comments or strings.
 
 .. END VARIABLES
 

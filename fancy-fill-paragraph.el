@@ -83,7 +83,7 @@ spaces on both sides.  For example \"-\" matches \" - \" in the text.
 WEIGHT is an integer from 0 to 100 (see `fancy-fill-paragraph-split-weights')."
   :type '(alist :key-type string :value-type natnum))
 
-(defcustom fancy-fill-paragraph-dot-point-prefix (list "- ")
+(defcustom fancy-fill-paragraph-dot-point-prefix (list "- " "* ")
   "List of dot-point prefix strings to detect.
 Each string is matched after optional leading blank-space.
 Set to nil to disable dot-point detection entirely."
@@ -160,6 +160,21 @@ Either or both may be nil."
     (min p1 p2))
    (t
     (or p1 p2))))
+
+(defsubst fancy-fill-paragraph--prefix-column-width (pos prefix)
+  "Return the column width of PREFIX at buffer position POS."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char pos)
+    (goto-char (min (+ pos (length prefix)) (pos-eol)))
+    (current-column)))
+
+(defsubst fancy-fill-paragraph--last-bol (end)
+  "Return the beginning-of-line position for buffer position END."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char end)
+    (pos-bol)))
 
 (defsubst fancy-fill-paragraph--string-blank-or-empty-p (str)
   "Return non-nil if STR is empty or contains only whitespace and newlines."
@@ -421,6 +436,35 @@ removed the prefix from TEXT)."
             (fancy-fill-paragraph--fill-region (car para-bounds) (cdr para-bounds)))))
       (buffer-string)))))
 
+(defun fancy-fill-paragraph--fill-and-reprefix
+    (lines local-fill-column cont-prefix &optional first-prefix)
+  "Fill LINES within LOCAL-FILL-COLUMN and re-add CONT-PREFIX to each output line.
+FIRST-PREFIX, when non-nil, is used instead of CONT-PREFIX on the
+first output line (e.g. for a comment opener like \"/** \")."
+  (declare (important-return-value t))
+  (let ((stripped-text (mapconcat #'identity lines "\n")))
+    ;; Return nil when stripped text is empty or whitespace-only.
+    (cond
+     ((fancy-fill-paragraph--string-blank-or-empty-p stripped-text)
+      nil)
+     (t
+      (let* ((filled-text
+              (fancy-fill-paragraph--fill-paragraphs-in-string stripped-text local-fill-column t))
+             (prefix-trimmed (string-trim-right cont-prefix))
+             (filled-lines (split-string filled-text "\n"))
+             (is-first t))
+        (mapconcat (lambda (line)
+                     (cond
+                      ((string-empty-p line)
+                       prefix-trimmed)
+                      (is-first
+                       (setq is-first nil)
+                       (concat (or first-prefix cont-prefix) line))
+                      (t
+                       (concat cont-prefix line))))
+                   filled-lines
+                   "\n"))))))
+
 (defun fancy-fill-paragraph--paragraph-bounds ()
   "Return (BEG . END) of the current paragraph."
   (declare (important-return-value t))
@@ -622,24 +666,73 @@ prefix, fills, then restores the opener."
          ;; Empty comment (e.g. "/*\n */") - nothing to fill.
          ((fancy-fill-paragraph--empty-syntax-region-p beg end))
          (t
-          ;; Inline delimiters - temporarily replace the comment-start
-          ;; character (e.g. "/" in "/*") with a space so the first
-          ;; line matches the continuation prefix, fill, then restore.
-          (let ((saved-char (char-after comment-start-pos)))
-            ;; Verify we are at a comment opener before modifying.
-            (unless (eq
-                     comment-start-pos
-                     (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss (1- end)))))
-              (error "Expected comment at %d, got `%c'" comment-start-pos saved-char))
-            (goto-char comment-start-pos)
-            (delete-char 1)
-            (insert ?\s)
-            (unwind-protect
-                (let ((fill-prefix cont-prefix))
-                  (fancy-fill-paragraph--fill-region beg end))
-              (goto-char comment-start-pos)
-              (delete-char 1)
-              (insert saved-char)))))))))
+          ;; Inline delimiters - fill without mutating the buffer.
+          ;; Capture the opener text (e.g. "/* " or "/** ") and
+          ;; use it as the first-line prefix when re-assembling.
+          ;; Verify we are at a comment opener before proceeding.
+          (unless (eq
+                   comment-start-pos
+                   (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss (1- end)))))
+            (error "Expected comment at %d" comment-start-pos))
+          (let* ((prefix-col
+                  (max (fancy-fill-paragraph--prefix-column-width beg cont-prefix)
+                       (length cont-prefix)))
+                 ;; The opener may be wider than cont-prefix (e.g. "/** "
+                 ;; vs " * ").  Compute opener-col by skipping past the
+                 ;; non-space opener characters and any trailing space(s).
+                 (opener-col
+                  (save-excursion
+                    (goto-char comment-start-pos)
+                    (skip-chars-forward "^ \t\n" (pos-eol))
+                    (skip-chars-forward " \t" (pos-eol))
+                    (current-column)))
+                 (opener-text
+                  (save-excursion
+                    (goto-char beg)
+                    (move-to-column opener-col)
+                    (buffer-substring-no-properties beg (point))))
+                 (last-bol (fancy-fill-paragraph--last-bol end))
+                 ;; When the last line is no wider than prefix-col it
+                 ;; holds only a closer (e.g. " */") and must be
+                 ;; preserved verbatim since stripping loses its text.
+                 (last-line-verbatim
+                  (save-excursion
+                    (goto-char last-bol)
+                    (and (> last-bol beg)
+                         (<= (- (pos-eol) last-bol) prefix-col)
+                         (buffer-substring-no-properties last-bol (pos-eol)))))
+                 ;; Collect content lines, stripping the prefix.
+                 ;; First line at opener-col, rest at prefix-col.
+                 ;; Exclude the closer line when preserved verbatim.
+                 (content-end-bol
+                  (cond
+                   (last-line-verbatim
+                    last-bol)
+                   (t
+                    (1+ last-bol))))
+                 (lines
+                  (save-excursion
+                    (goto-char beg)
+                    (move-to-column opener-col)
+                    (let ((result (list (buffer-substring-no-properties (point) (pos-eol)))))
+                      (forward-line 1)
+                      (while (< (point) content-end-bol)
+                        (move-to-column prefix-col)
+                        (push (buffer-substring-no-properties (point) (pos-eol)) result)
+                        (forward-line 1))
+                      (nreverse result))))
+                 (local-fill-column (max 1 (- fill-column prefix-col)))
+                 (filled-result
+                  (fancy-fill-paragraph--fill-and-reprefix lines local-fill-column cont-prefix
+                                                           opener-text))
+                 ;; Append the verbatim closer line when present.
+                 (result
+                  (cond
+                   (last-line-verbatim
+                    (concat filled-result "\n" last-line-verbatim))
+                   (t
+                    filled-result))))
+            (save-excursion (replace-region-contents beg end (lambda () result))))))))))
 
 (defun fancy-fill-paragraph--fill-string-region (beg end)
   "Fill a string in the region BEG..END.
