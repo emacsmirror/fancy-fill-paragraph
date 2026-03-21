@@ -79,9 +79,6 @@ Customization
 -------------
 
 .. BEGIN VARIABLES
-``fancy-fill-paragraph-sentence-end-double-space``: ``t``
-   When non-nil use two spaces after a period when joining sentences on a line.
-
 ``fancy-fill-paragraph-split-weights``: ``nil``
    Overrides for splitting weights at punctuation boundaries as a plist.
    Each value is an integer from 0 to 100 where 0 means never split

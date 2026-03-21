@@ -40,9 +40,6 @@
   "Fancy paragraph fill."
   :group 'convenience)
 
-(defcustom fancy-fill-paragraph-sentence-end-double-space t
-  "When non-nil use two spaces after a period when joining sentences on a line."
-  :type 'boolean)
 
 (defcustom fancy-fill-paragraph-split-weights nil
   "Overrides for splitting weights at punctuation boundaries as a plist.
@@ -119,24 +116,24 @@ Argument _POS is ignored."
 (defun fancy-fill-paragraph--join-string-sentence-end (_pos)
   "Return the join string for sentence-ending punctuation.
 Uses double space when variable
-`fancy-fill-paragraph-sentence-end-double-space' is non-nil.
+`sentence-end-double-space' is non-nil.
 Argument _POS is ignored."
   (declare (important-return-value t))
   (cond
-   (fancy-fill-paragraph-sentence-end-double-space
+   (sentence-end-double-space
     "  ")
    (t
     " ")))
 
 (defsubst fancy-fill-paragraph--maybe-double-space (sep text split-pos)
   "Upgrade SEP to double-space when TEXT at SPLIT-POS follows a sentence end.
-When `fancy-fill-paragraph-sentence-end-double-space' is active and the
+When `sentence-end-double-space' is active and the
 delimiter at SPLIT-POS follows sentence-ending punctuation (e.g. `.\\'',
 `.)'), return double-space.  Exclude continuation punctuation (`,;:')
 where the period is typically an abbreviation (e.g. `etc.,')."
   (declare (important-return-value t))
   (cond
-   ((and fancy-fill-paragraph-sentence-end-double-space
+   ((and sentence-end-double-space
          (>= split-pos 2)
          (not (memq (aref text (1- split-pos)) '(?, ?\; ?:)))
          (memq (aref text (- split-pos 2)) '(?. ?? ?! ?\u2026)))
@@ -732,10 +729,12 @@ prefix, fills, then restores the opener."
                  ;; Append the verbatim closer line when present.
                  (result
                   (cond
-                   ((null filled-result) nil)
+                   ((null filled-result)
+                    nil)
                    (last-line-verbatim
                     (concat filled-result "\n" last-line-verbatim))
-                   (t filled-result))))
+                   (t
+                    filled-result))))
             (when result
               (save-excursion (replace-region-contents beg end (lambda () result)))))))))))
 
