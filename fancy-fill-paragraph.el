@@ -83,11 +83,21 @@ spaces on both sides.  For example \"-\" matches \" - \" in the text.
 WEIGHT is an integer from 0 to 100 (see `fancy-fill-paragraph-split-weights')."
   :type '(alist :key-type string :value-type natnum))
 
-(defcustom fancy-fill-paragraph-dot-point-prefix (list "- " "* ")
-  "List of dot-point prefix strings to detect.
-Each string is matched after optional leading blank-space.
+(defcustom fancy-fill-paragraph-dot-point-prefix (list "- " "* " '(:regexp . "[0-9]+\\. "))
+  "List of dot-point prefix patterns to detect.
+Each entry is one of:
+
+- A string: matched literally after optional leading blank-space.
+  For example \"- \" detects lines like \"  - item text\".
+
+- A cons (:regexp . PATTERN): PATTERN is a regexp whose entire match
+  is the prefix.  For example (:regexp . \"[0-9]+\\\\. \") detects
+  numbered lists like \"1. \", \"10. \", \"123. \".
+
 Set to nil to disable dot-point detection entirely."
-  :type '(repeat string))
+  :type
+  '(repeat (choice (string :tag "Literal")
+                   (cons :tag "Regexp" (const :regexp) string))))
 
 (defcustom fancy-fill-paragraph-syntax-bounds t
   "When non-nil, constrain paragraphs to syntax boundaries.
@@ -186,10 +196,7 @@ Either or both may be nil."
 True when the delimiters are on separate lines and the opener line
 contains only the delimiter (no text after it)."
   (declare (important-return-value t))
-  (and (< beg
-          (save-excursion
-            (goto-char end)
-            (pos-bol)))
+  (and (< beg (fancy-fill-paragraph--last-bol end))
        (save-excursion
          (goto-char beg)
          (skip-chars-forward "^ \t\n" (pos-eol))
@@ -402,13 +409,12 @@ the first entry in the table takes priority.")
 ;; Private Functions
 
 (defun fancy-fill-paragraph--fill-paragraphs-in-string
-    (text local-fill-column &optional prefix-stripped)
+    (text local-fill-column &optional suppress-prefix)
   "Fill each paragraph in TEXT independently within LOCAL-FILL-COLUMN.
 Paragraphs are separated by blank lines.  Returns the filled text
 with paragraph separators preserved.
-When PREFIX-STRIPPED is non-nil, set `fill-prefix' to the empty string
-so `fill-context-prefix' detection is suppressed (the caller already
-removed the prefix from TEXT)."
+When SUPPRESS-PREFIX is non-nil, set `fill-prefix' to the empty string
+so `fill-context-prefix' detection is suppressed."
   (declare (important-return-value t))
   ;; Nothing to fill when text is empty or whitespace-only.
   (cond
@@ -418,9 +424,7 @@ removed the prefix from TEXT)."
     (with-temp-buffer
       (insert text)
       (let ((fill-column local-fill-column)
-            (fill-prefix
-             (when prefix-stripped
-               "")))
+            (fill-prefix (and suppress-prefix "")))
         (let ((bounds nil))
           (goto-char (point-min))
           (while (progn
@@ -728,11 +732,12 @@ prefix, fills, then restores the opener."
                  ;; Append the verbatim closer line when present.
                  (result
                   (cond
+                   ((null filled-result) nil)
                    (last-line-verbatim
                     (concat filled-result "\n" last-line-verbatim))
-                   (t
-                    filled-result))))
-            (save-excursion (replace-region-contents beg end (lambda () result))))))))))
+                   (t filled-result))))
+            (when result
+              (save-excursion (replace-region-contents beg end (lambda () result)))))))))))
 
 (defun fancy-fill-paragraph--fill-string-region (beg end)
   "Fill a string in the region BEG..END.
@@ -1006,27 +1011,41 @@ Uses dynamic programming to minimize raggedness."
       lines)))
 
 
-(defun fancy-fill-paragraph--dot-point-rx-list ()
-  "Build a list of (REGEX . DP-PREFIX-STRING) for each configured prefix.
-The regex matches the prefix after optional leading blank-space."
+(defun fancy-fill-paragraph--dot-point-pattern-list ()
+  "Build a pattern list for dot-point prefix matching.
+Literal string entries are passed through as-is.
+Regexp entries become (REGEX . t) where REGEX includes capture groups
+for leading blank-space (group 1) and the prefix (group 2)."
   (declare (important-return-value t))
   (mapcar
-   (lambda (dp) (cons (concat "\\`\\([ \t]*\\)" (regexp-quote dp)) dp))
+   (lambda (dp)
+     (cond
+      ((stringp dp)
+       dp)
+      (t
+       (cons (concat "\\`\\([ \t]*\\)\\(" (cdr dp) "\\)") t))))
    fancy-fill-paragraph-dot-point-prefix))
 
-(defun fancy-fill-paragraph--line-dot-point-match (line rx-list)
-  "Check if LINE matches a dot-point prefix using pre-built RX-LIST.
-RX-LIST is from `fancy-fill-paragraph--dot-point-rx-list'.
+(defun fancy-fill-paragraph--line-dot-point-match (line dp-list)
+  "Check if LINE matches a dot-point prefix using pre-built DP-LIST.
+DP-LIST is from `fancy-fill-paragraph--dot-point-pattern-list'.
 Returns (INDENT-WIDTH . DP-PREFIX-STRING) or nil.
 INDENT-WIDTH is the number of leading blank-space characters."
   (declare (important-return-value t))
   (let ((result nil)
-        (entries-remaining rx-list))
+        (entries-remaining dp-list))
     (while (and entries-remaining (null result))
-      (let ((rx-entry (car entries-remaining)))
-        (when (string-match (car rx-entry) line)
-          ;; Use match positions to compute indent width, avoiding `match-string' allocation.
-          (setq result (cons (- (match-end 1) (match-beginning 1)) (cdr rx-entry)))))
+      (let ((entry (car entries-remaining)))
+        (cond
+         ((stringp entry)
+          ;; Literal: check leading whitespace then prefix.
+          (let ((indent (fancy-fill-paragraph--leading-indent line)))
+            (when (eq t (compare-strings entry 0 nil line indent (+ indent (length entry))))
+              (setq result (cons indent entry)))))
+         (t
+          ;; Regexp: match and extract prefix from group 2.
+          (when (string-match (car entry) line)
+            (setq result (cons (- (match-end 1) (match-beginning 1)) (match-string 2 line)))))))
       (setq entries-remaining (cdr entries-remaining)))
     result))
 
@@ -1047,12 +1066,25 @@ Joins lines, normalizes blank-space, splits at delimiters, and solves."
         ;; When an item would look like a dot-point prefix if placed at the
         ;; beginning of a line, set a very high cost on that break.
         (when fancy-fill-paragraph-dot-point-prefix
-          (let ((items-tail (cdr items))
+          (let ((dp-checks
+                 (mapcar
+                  (lambda (dp)
+                    (cond
+                     ((stringp dp)
+                      dp)
+                     (t
+                      (concat "\\`" (cdr dp)))))
+                  fancy-fill-paragraph-dot-point-prefix))
+                (items-tail (cdr items))
                 (i 0))
             (while items-tail
               (let ((item-with-space (concat (car items-tail) " ")))
-                (dolist (dp fancy-fill-paragraph-dot-point-prefix)
-                  (when (string-prefix-p dp item-with-space)
+                (dolist (dp-check dp-checks)
+                  (when (cond
+                         ((stringp dp-check)
+                          (string-prefix-p dp-check item-with-space))
+                         (t
+                          (string-match-p dp-check item-with-space)))
                     (aset break-weights i fancy-fill-paragraph--prevent-dot-point-penalty))))
               (setq items-tail (cdr items-tail))
               (setq i (1+ i)))))
@@ -1066,13 +1098,13 @@ Joins lines, normalizes blank-space, splits at delimiters, and solves."
      (t
       nil))))
 
-(defun fancy-fill-paragraph--fill-lines-indent-split (lines local-fill-column rx-list)
+(defun fancy-fill-paragraph--fill-lines-indent-split (lines local-fill-column dp-list)
   "Fill LINES, splitting into sub-paragraphs at indentation changes.
 LOCAL-FILL-COLUMN is the target line width.
 Groups consecutive lines with the same leading whitespace and fills
 each group independently via `fancy-fill-paragraph--fill-lines'.
 Falls through to plain fill when all lines share the same indentation.
-RX-LIST is passed through for dot-point detection in recursive calls."
+DP-LIST is passed through for dot-point detection in recursive calls."
   (declare (important-return-value t))
   (let* ((n (length lines))
          (indents (make-vector n 0))
@@ -1129,24 +1161,24 @@ RX-LIST is passed through for dot-point detection in recursive calls."
                     (mapcar
                      (lambda (line) (fancy-fill-paragraph--strip-indent line indent)) group-lines))
                    ;; Recursively fill (may trigger dot-point or further indent-split).
-                   (filled (fancy-fill-paragraph--fill-lines stripped sub-fill-column rx-list)))
+                   (filled (fancy-fill-paragraph--fill-lines stripped sub-fill-column dp-list)))
               ;; Re-add indent to each result line.
               (fancy-fill-paragraph--append-tail
                   result-tail
                 (mapcar (lambda (line) (concat indent-str line)) filled))))))))))
 
-(defun fancy-fill-paragraph--fill-lines (lines local-fill-column rx-list)
+(defun fancy-fill-paragraph--fill-lines (lines local-fill-column dp-list)
   "Fill LINES within LOCAL-FILL-COLUMN, handling dot-points recursively.
 LINES is a list of strings.  Returns a list of result line strings.
-RX-LIST is a pre-built regex list from
-`fancy-fill-paragraph--dot-point-rx-list'.
-When RX-LIST is non-nil, detects dot-point prefixes and fills each
+DP-LIST is a pre-built pattern list from
+`fancy-fill-paragraph--dot-point-pattern-list'.
+When DP-LIST is non-nil, detects dot-point prefixes and fills each
 item as a separate sub-paragraph.  Falls through to plain fill when
 no dot-points are found."
   (declare (important-return-value t))
   (cond
-   ;; Dot-point mode disabled (rx-list is nil), skip dot-point scan.
-   ((null rx-list)
+   ;; Dot-point mode disabled (dp-list is nil), skip dot-point scan.
+   ((null dp-list)
     (fancy-fill-paragraph--fill-lines-indent-split lines local-fill-column nil))
    (t
     (let* ((n (length lines))
@@ -1157,7 +1189,7 @@ no dot-points are found."
            (i 0))
       (while lines-remaining
         (let ((dp-match
-               (fancy-fill-paragraph--line-dot-point-match (car lines-remaining) rx-list)))
+               (fancy-fill-paragraph--line-dot-point-match (car lines-remaining) dp-list)))
           (aset matches i dp-match)
           (when dp-match
             (setq has-dp t)
@@ -1168,7 +1200,7 @@ no dot-points are found."
       (cond
        ;; No dot-points found, try indent-split.
        ((not has-dp)
-        (fancy-fill-paragraph--fill-lines-indent-split lines local-fill-column rx-list))
+        (fancy-fill-paragraph--fill-lines-indent-split lines local-fill-column dp-list))
        (t
         ;; Group lines into preamble and dot-point groups using cached matches.
         ;; Each group is (DP-PREFIX FIRST-LINE CONT-LINE ...) where
@@ -1223,7 +1255,7 @@ no dot-points are found."
               (when preamble
                 (fancy-fill-paragraph--append-tail
                     result-tail
-                  (fancy-fill-paragraph--fill-lines preamble local-fill-column rx-list)))
+                  (fancy-fill-paragraph--fill-lines preamble local-fill-column dp-list)))
 
               ;; Fill each dot-point group.
               ;; Group structure after nreverse: (DP-PREFIX FIRST-LINE CONT-LINES...).
@@ -1247,7 +1279,7 @@ no dot-points are found."
 
                   ;; Recursively fill the body.
                   (let ((filled
-                         (fancy-fill-paragraph--fill-lines body-lines sub-fill-column rx-list))
+                         (fancy-fill-paragraph--fill-lines body-lines sub-fill-column dp-list))
                         (prefixed nil))
                     ;; Re-add indent + prefix.
                     (dolist (line filled)
@@ -1264,7 +1296,7 @@ no dot-points are found."
               (when trailing
                 (fancy-fill-paragraph--append-tail
                     result-tail
-                  (fancy-fill-paragraph--fill-lines trailing local-fill-column rx-list))))))))))))
+                  (fancy-fill-paragraph--fill-lines trailing local-fill-column dp-list))))))))))))
 
 (defun fancy-fill-paragraph--fill-region (beg end)
   "Fill the paragraph in the region from BEG to END.
@@ -1279,7 +1311,7 @@ and re-adds the prefix to each output line."
             (goto-char (min (+ beg (length prefix)) (pos-eol)))
             (current-column)))
          ;; Build regex list for prefix checking (always) and dot-point filling.
-         (rx-list (fancy-fill-paragraph--dot-point-rx-list))
+         (dp-list (fancy-fill-paragraph--dot-point-pattern-list))
          (first-line
           (save-excursion
             (goto-char beg)
@@ -1290,8 +1322,8 @@ and re-adds the prefix to each output line."
          ;; and ensures continuation lines are indented correctly.
          (prefix
           (cond
-           ((and rx-list (not (string-empty-p prefix)))
-            (let ((m (fancy-fill-paragraph--line-dot-point-match first-line rx-list)))
+           ((and dp-list (not (string-empty-p prefix)))
+            (let ((m (fancy-fill-paragraph--line-dot-point-match first-line dp-list)))
               (cond
                ((and m (> (length prefix) (car m)))
                 (setq prefix-column-width (car m))
@@ -1339,14 +1371,14 @@ and re-adds the prefix to each output line."
                 (forward-line 1))
               (nreverse result))))
          ;; Fill using dot-point aware function.
-         ;; Always pass rx-list so dot-points are automatically detected;
+         ;; Always pass dp-list so dot-points are automatically detected;
          ;; `--fill-lines' falls through to plain fill when none are found.
          (filled
           (fancy-fill-paragraph--fill-lines
            lines
            (max 1
                 (- fill-column fancy-fill-paragraph-fill-column-margin prefix-column-width))
-           rx-list)))
+           dp-list)))
     (when filled
       (let ((result (mapconcat (lambda (line) (concat prefix line)) filled "\n")))
         (save-excursion
