@@ -137,9 +137,17 @@ Customization
    spaces on both sides.  For example "-" matches " - " in the text.
    WEIGHT is an integer from 0 to 100 (see ``fancy-fill-paragraph-split-weights``).
 
-``fancy-fill-paragraph-dot-point-prefix``: ``("- " "* ")``
-   List of dot-point prefix strings to detect.
-   Each string is matched after optional leading blank-space.
+``fancy-fill-paragraph-dot-point-prefix``: ``("- " "* " (``:regexp`` . "[0-9]+\\. "))``
+   List of dot-point prefix patterns to detect.
+   Each entry is one of:
+
+   - A string: matched literally after optional leading blank-space.
+     For example "- " detects lines like "  - item text".
+
+   - A cons (``:regexp`` . PATTERN): PATTERN is a regexp whose entire match
+     is the prefix.  For example (``:regexp`` . "[0-9]+\\. ") detects
+     numbered lists like "1. ", "10. ", "123. ".
+
    Set to nil to disable dot-point detection entirely.
 
 ``fancy-fill-paragraph-syntax-bounds``: ``t``

@@ -2622,51 +2622,6 @@
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
-(ert-deftest fill-syntax-bounds-c-mode-block-comment-multi-paragraph ()
-  "C-mode block comment with blank `*' lines should preserve separate paragraphs."
-  (let ((fill-column 80)
-        (fancy-fill-paragraph-syntax-bounds t)
-        (fancy-fill-paragraph-sentence-end-double-space nil)
-        (text-initial
-         (concat
-          "    /* Refresh so the block is recreated with the region visible.\n"
-          "     *\n"
-          "     * Without this, `block_begin` sets #BLOCK_LOOP before the region is shown,\n"
-          "     * causing `template_popup_confirm` to skip attaching its close callback\n"
-          "     * (since it assumes #BLOCK_LOOP menus close via `menuretval`).\n"
-          "     * With #BLOCK_KEEP_OPEN set this doesn't happen.\n"
-          "     *\n"
-          "     * An alternative would be to ensure the popup state always matches\n"
-          "     * the initial state, however this ends up involving assumptions\n"
-          "     * which may not hold in *every* case,\n"
-          "     * so triggering a refresh is a reasonable solution.\n"
-          "     * A refresh also occurs when moving the cursor between buttons,\n"
-          "     * so it's expected\n"
-          "     * to be fast. see #155320.\n"
-          "     */"))
-        (text-expected
-         (concat
-          "    /* Refresh so the block is recreated with the region visible.\n"
-          "     *\n"
-          "     * Without this, `block_begin` sets #BLOCK_LOOP before the region is shown,\n"
-          "     * causing `template_popup_confirm` to skip attaching its close callback\n"
-          "     * (since it assumes #BLOCK_LOOP menus close via `menuretval`).\n"
-          "     * With #BLOCK_KEEP_OPEN set this doesn't happen.\n"
-          "     *\n"
-          "     * An alternative would be to ensure the popup state always matches the\n"
-          "     * initial state, however this ends up involving assumptions which may not\n"
-          "     * hold in *every* case, so triggering a refresh is a reasonable solution.\n"
-          "     * A refresh also occurs when moving the cursor between buttons,\n"
-          "     * so it's expected to be fast. see #155320.\n"
-          "     */")))
-    (with-temp-buffer
-      (c-mode)
-      (let ((inhibit-message t))
-        (buffer-reset-text text-initial)
-        (goto-char (+ (point-min) 6))
-        (fancy-fill-paragraph)
-        (should (equal text-expected (buffer-string)))))))
-
 (ert-deftest fill-syntax-bounds-c-mode-javadoc-inline-wrap ()
   "C-mode Javadoc inline comment with `/**' opener should preserve the opener."
   (let ((fill-column 72)
@@ -2764,6 +2719,181 @@
         (goto-char (+ (point-min) 5))
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-multi-paragraph ()
+  "C-mode block comment with blank `*' lines should preserve separate paragraphs."
+  (let ((fill-column 80)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    /* Refresh so the block is recreated with the region visible.\n"
+          "     *\n"
+          "     * Without this, `block_begin` sets #BLOCK_LOOP before the region is shown,\n"
+          "     * causing `template_popup_confirm` to skip attaching its close callback\n"
+          "     * (since it assumes #BLOCK_LOOP menus close via `menuretval`).\n"
+          "     * With #BLOCK_KEEP_OPEN set this doesn't happen.\n"
+          "     *\n"
+          "     * An alternative would be to ensure the popup state always matches\n"
+          "     * the initial state, however this ends up involving assumptions\n"
+          "     * which may not hold in *every* case,\n"
+          "     * so triggering a refresh is a reasonable solution.\n"
+          "     * A refresh also occurs when moving the cursor between buttons,\n"
+          "     * so it's expected\n"
+          "     * to be fast. see #155320.\n"
+          "     */"))
+        (text-expected
+         (concat
+          "    /* Refresh so the block is recreated with the region visible.\n"
+          "     *\n"
+          "     * Without this, `block_begin` sets #BLOCK_LOOP before the region is shown,\n"
+          "     * causing `template_popup_confirm` to skip attaching its close callback\n"
+          "     * (since it assumes #BLOCK_LOOP menus close via `menuretval`).\n"
+          "     * With #BLOCK_KEEP_OPEN set this doesn't happen.\n"
+          "     *\n"
+          "     * An alternative would be to ensure the popup state always matches the\n"
+          "     * initial state, however this ends up involving assumptions which may not\n"
+          "     * hold in *every* case, so triggering a refresh is a reasonable solution.\n"
+          "     * A refresh also occurs when moving the cursor between buttons,\n"
+          "     * so it's expected to be fast. see #155320.\n"
+          "     */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (+ (point-min) 6))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-markdown-numbered-list ()
+  "Markdown numbered list with multi-digit numbers should fill each item independently."
+  (let ((fill-column 40)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (fancy-fill-paragraph-dot-point-prefix (list "- " '(:regexp . "[0-9]+\\. ")))
+        (text-initial
+         (concat
+          "9. Alpha bravo charlie\n"
+          "   delta echo foxtrot.\n"
+          "10. Golf hotel india\n"
+          "    juliet kilo lima.\n"
+          "11. Mike november oscar\n"
+          "    papa quebec romeo."))
+        (text-expected
+         (concat
+          "9. Alpha bravo charlie delta echo\n"
+          "   foxtrot.\n"
+          "10. Golf hotel india juliet kilo lima.\n"
+          "11. Mike november oscar papa quebec\n"
+          "    romeo.")))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char (point-min))
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
+(ert-deftest fill-markdown-numbered-list-extreme-width ()
+  "Numbered list alternating short and long prefixes should use correct indent per item."
+  ;; "1. " = 3 chars (sub-fc 69), "10000000000000000000000000000000000. " = 37 chars (sub-fc 35).
+  ;; Alternating prefix widths verify each item computes its own continuation indent.
+  (let ((fill-column 72)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (fancy-fill-paragraph-dot-point-prefix (list '(:regexp . "[0-9]+\\. ")))
+        (text-initial
+         (concat
+          "1. Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike .\n"
+          "10000000000000000000000000000000000. Alpha bravo charlie delta echo foxtrot golf.\n"
+          "                                     Kilo lima mike.\n"
+          "2. Quebec romeo sierra tango uniform victor whiskey xray yankee zulu alpha bravo.\n"
+          "10000000000000000000000000000000001. Foxtrot golf hotel india juliet kilo lima mike.\n"
+          "                                     Papa quebec romeo.\n"
+          "3. Sierra tango uniform victor whiskey xray yankee zulu alpha bravo charlie delta .\n"
+          "10000000000000000000000000000000002. Hotel india juliet kilo lima mike november.\n"
+          "                                     Romeo sierra tango."))
+        (text-expected
+         (concat
+          "1. Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo\n"
+          "   lima mike .\n"
+          "10000000000000000000000000000000000. Alpha bravo charlie delta echo\n"
+          "                                     foxtrot golf. Kilo lima mike.\n"
+          "2. Quebec romeo sierra tango uniform victor whiskey xray yankee zulu\n"
+          "   alpha bravo.\n"
+          "10000000000000000000000000000000001. Foxtrot golf hotel india juliet\n"
+          "                                     kilo lima mike. Papa quebec romeo.\n"
+          "3. Sierra tango uniform victor whiskey xray yankee zulu alpha bravo\n"
+          "   charlie delta .\n"
+          "10000000000000000000000000000000002. Hotel india juliet kilo lima mike\n"
+          "                                     november. Romeo sierra tango.")))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char (point-min))
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-numbered-list ()
+  "Numbered list inside a C block comment should fill each item independently."
+  (let ((fill-column 40)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (fancy-fill-paragraph-dot-point-prefix (list "- " '(:regexp . "[0-9]+\\. ")))
+        (text-initial
+         (concat
+          "/*\n"
+          " * Steps:\n"
+          " *\n"
+          " * 1. Alpha bravo charlie delta echo foxtrot golf.\n"
+          " * 2. Hotel india juliet kilo lima mike november.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/*\n"
+          " * Steps:\n"
+          " *\n"
+          " * 1. Alpha bravo charlie delta echo\n"
+          " *    foxtrot golf.\n"
+          " * 2. Hotel india juliet kilo lima mike\n"
+          " *    november.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (+ (point-min) 5))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-mixed-literal-and-regexp-dot-points ()
+  "Literal `- ' and regexp numbered dot-points in the same text."
+  (let ((fill-column 40)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (fancy-fill-paragraph-dot-point-prefix (list "- " '(:regexp . "[0-9]+\\. ")))
+        (text-initial
+         (concat
+          "- Alpha bravo charlie delta echo foxtrot.\n"
+          "1. Golf hotel india juliet kilo lima mike."))
+        (text-expected
+         (concat
+          "- Alpha bravo charlie delta echo\n"
+          "  foxtrot.\n"
+          "1. Golf hotel india juliet kilo lima\n"
+          "   mike.")))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char (point-min))
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
+(ert-deftest fill-regexp-dot-point-no-match-without-space ()
+  "Text like `1.noSpace' should not match the numbered list regexp."
+  (let ((fill-column 30)
+        (fancy-fill-paragraph-sentence-end-double-space nil)
+        (fancy-fill-paragraph-dot-point-prefix (list '(:regexp . "[0-9]+\\. ")))
+        (text-initial "1.noSpace should not match and 2.this also not.")
+        (text-expected
+         ;; format-next-line: off
+         (concat
+          "1.noSpace should not match and\n"
+          "2.this also not.")))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char (point-min))
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
 
 ;; Local Variables:
 ;; fill-column: 99
