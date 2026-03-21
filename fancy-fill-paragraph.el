@@ -161,6 +161,26 @@ Either or both may be nil."
    (t
     (or p1 p2))))
 
+(defsubst fancy-fill-paragraph--string-blank-or-empty-p (str)
+  "Return non-nil if STR is empty or contains only whitespace and newlines."
+  (declare (important-return-value t))
+  (string-match-p "\\`[ \t\n]*\\'" str))
+
+(defsubst fancy-fill-paragraph--empty-syntax-region-p (beg end)
+  "Return non-nil if the syntax region BEG..END has no fillable content.
+True when the delimiters are on separate lines and the opener line
+contains only the delimiter (no text after it)."
+  (declare (important-return-value t))
+  (and (< beg
+          (save-excursion
+            (goto-char end)
+            (pos-bol)))
+       (save-excursion
+         (goto-char beg)
+         (skip-chars-forward "^ \t\n" (pos-eol))
+         (skip-chars-forward " \t" (pos-eol))
+         (eolp))))
+
 (defsubst fancy-fill-paragraph--strip-indent (line n)
   "Strip N leading characters from LINE.
 Falls back to `string-trim-left' when LINE is shorter than N."
@@ -375,26 +395,31 @@ When PREFIX-STRIPPED is non-nil, set `fill-prefix' to the empty string
 so `fill-context-prefix' detection is suppressed (the caller already
 removed the prefix from TEXT)."
   (declare (important-return-value t))
-  (with-temp-buffer
-    (insert text)
-    (let ((fill-column local-fill-column)
-          (fill-prefix
-           (when prefix-stripped
-             "")))
-      (let ((bounds nil))
-        (goto-char (point-min))
-        (while (progn
-                 (skip-chars-forward " \t\n" (point-max))
-                 (< (point) (point-max)))
-          (let ((para-beg (pos-bol)))
-            (forward-paragraph 1)
-            (let ((resume (point)))
-              (skip-chars-backward " \t\n" para-beg)
-              (push (cons para-beg (pos-eol)) bounds)
-              (goto-char resume))))
-        (dolist (para-bounds bounds)
-          (fancy-fill-paragraph--fill-region (car para-bounds) (cdr para-bounds)))))
-    (buffer-string)))
+  ;; Nothing to fill when text is empty or whitespace-only.
+  (cond
+   ((fancy-fill-paragraph--string-blank-or-empty-p text)
+    text)
+   (t
+    (with-temp-buffer
+      (insert text)
+      (let ((fill-column local-fill-column)
+            (fill-prefix
+             (when prefix-stripped
+               "")))
+        (let ((bounds nil))
+          (goto-char (point-min))
+          (while (progn
+                   (skip-chars-forward " \t\n" (point-max))
+                   (< (point) (point-max)))
+            (let ((para-beg (pos-bol)))
+              (forward-paragraph 1)
+              (let ((resume (point)))
+                (skip-chars-backward " \t\n" para-beg)
+                (push (cons para-beg (pos-eol)) bounds)
+                (goto-char resume))))
+          (dolist (para-bounds bounds)
+            (fancy-fill-paragraph--fill-region (car para-bounds) (cdr para-bounds)))))
+      (buffer-string)))))
 
 (defun fancy-fill-paragraph--paragraph-bounds ()
   "Return (BEG . END) of the current paragraph."
@@ -594,6 +619,8 @@ prefix, fills, then restores the opener."
               ;; fall back to standard fill.
               (let ((fill-prefix cont-prefix))
                 (fancy-fill-paragraph--fill-region body-beg body-end))))))
+         ;; Empty comment (e.g. "/*\n */") - nothing to fill.
+         ((fancy-fill-paragraph--empty-syntax-region-p beg end))
          (t
           ;; Inline delimiters - temporarily replace the comment-start
           ;; character (e.g. "/" in "/*") with a space so the first
@@ -629,6 +656,8 @@ of the text."
              (body-text (buffer-substring-no-properties body-beg body-end))
              (filled-text (fancy-fill-paragraph--fill-paragraphs-in-string body-text fill-column)))
         (save-excursion (replace-region-contents body-beg body-end (lambda () filled-text)))))
+     ;; Empty string (e.g. """\n""") - nothing to fill.
+     ((fancy-fill-paragraph--empty-syntax-region-p beg end))
      (t
       ;; Inline delimiters - fill the entire region.
       (fancy-fill-paragraph--fill-region beg end)))))
