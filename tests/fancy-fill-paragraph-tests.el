@@ -2506,6 +2506,64 @@
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-string-three-line-unwrap ()
+  "Three short lines in a Python triple-quoted string should unwrap."
+  (let ((fill-column 52)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial (concat "\"\"\"\n" "AAA.\n" "BBB.\n" "CCC.\n" "\n" "\n" "\"\"\""))
+        (text-expected (concat "\"\"\"\n" "AAA. BBB. CCC.\n" "\n" "\n" "\"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (forward-line 1)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comments-three-line-wrap ()
+  "Three long Python comment lines should wrap within fill-column."
+  (let ((fill-column 52)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "# Alpha bravo charlie delta echo foxtrot golf hotel india.\n"
+          "# Juliet kilo lima mike november oscar papa quebec.\n"
+          "# Romeo sierra tango uniform victor whiskey xray."))
+        (text-expected
+         (concat
+          "# Alpha bravo charlie delta echo\n"
+          "# foxtrot golf hotel india.\n"
+          "# Juliet kilo lima mike november oscar papa quebec.\n"
+          "# Romeo sierra tango uniform victor whiskey xray.")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (forward-line 1)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comments-three-line-unwrap ()
+  "Three short Python comment lines should unwrap within fill-column."
+  (let ((fill-column 52)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial (concat "# AAA.\n" "# BBB.\n" "# CCC."))
+        (text-expected "# AAA. BBB. CCC."))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (forward-line 1)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-c-mode-comments-wrap ()
   "C-mode inline block comments should wrap using `comment-continue'."
   (let ((fill-column 40)
@@ -2622,6 +2680,194 @@
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-elisp-comments-three-line-wrap ()
+  "Three long Emacs Lisp comment lines should wrap within fill-column."
+  (let ((fill-column 52)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          ";; Alpha bravo charlie delta echo foxtrot golf hotel india.\n"
+          ";; Juliet kilo lima mike november oscar papa quebec.\n"
+          ";; Romeo sierra tango uniform victor whiskey xray."))
+        (text-expected
+         (concat
+          ";; Alpha bravo charlie delta echo\n"
+          ";; foxtrot golf hotel india.\n"
+          ";; Juliet kilo lima mike november oscar papa quebec.\n"
+          ";; Romeo sierra tango uniform victor whiskey xray.")))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-elisp-comments-three-line-unwrap ()
+  "Three short Emacs Lisp comment lines should unwrap within fill-column."
+  (let ((fill-column 52)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat ";; Alpha bravo charlie\n" ";; delta echo foxtrot.\n" ";; Golf hotel india."))
+        (text-expected
+         (concat ";; Alpha bravo charlie delta echo foxtrot.\n" ";; Golf hotel india.")))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-cursor-first-paragraph ()
+  "With cursor in the first paragraph of a two-paragraph block comment, only first fills."
+  (let ((fill-column 40)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/* Alpha bravo charlie delta\n"
+          " * echo foxtrot golf.\n"
+          " * Hotel india juliet.\n"
+          " *\n"
+          " * Kilo lima mike november\n"
+          " * oscar papa quebec.\n"
+          " * Romeo sierra tango.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/* Alpha bravo charlie delta\n"
+          " * echo foxtrot golf.\n"
+          " * Hotel india juliet.\n"
+          " *\n"
+          " * Kilo lima mike november\n"
+          " * oscar papa quebec.\n"
+          " * Romeo sierra tango.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (search-forward "echo")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-cursor-second-paragraph ()
+  "With cursor in the second paragraph of a two-paragraph block comment, only the second fills."
+  (let ((fill-column 40)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/* Alpha bravo charlie delta\n"
+          " * echo foxtrot golf.\n"
+          " * Hotel india juliet.\n"
+          " *\n"
+          " * Kilo lima mike november\n"
+          " * oscar papa quebec.\n"
+          " * Romeo sierra tango.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/* Alpha bravo charlie delta\n"
+          " * echo foxtrot golf.\n"
+          " * Hotel india juliet.\n"
+          " *\n"
+          " * Kilo lima mike november oscar papa\n"
+          " * quebec. Romeo sierra tango.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (search-forward "oscar")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-dot-points-noop ()
+  "C-mode block comment with dot-points already at fill-column should be unchanged."
+  (let ((fill-column 80)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "  /* Alpha bravo.\n"
+          "   *\n"
+          "   * Charlie delta echo:\n"
+          "   * - Foxtrot golf hotel india juliet kilo,\n"
+          "   *   lima mike november oscar papa quebec romeo sierra.\n"
+          "   * - Tango uniform victor whiskey xray yankee zulu alpha, bravo charlie delta\n"
+          "   *   echo foxtrot golf hotel india. Juliet kilo lima mike november oscar,\n"
+          "   *   papa quebec romeo sierra tango uniform.\n"
+          "   * - Victor whiskey xray.\n"
+          "   */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (search-forward "Charlie")
+        (fancy-fill-paragraph)
+        (should (equal text-initial (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-tab-indent-noop ()
+  "C-mode block comment with tab indent and dot-points should be unchanged."
+  (let ((fill-column 80)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "\t/* Alpha bravo.\n"
+          "\t *\n"
+          "\t * Charlie delta echo:\n"
+          "\t * - Foxtrot golf hotel india juliet kilo,\n"
+          "\t *   lima mike november oscar papa quebec romeo sierra.\n"
+          "\t * - Tango uniform victor whiskey xray yankee zulu alpha,\n"
+          "\t *   bravo charlie delta echo foxtrot golf hotel india.\n"
+          "\t * - Victor whiskey xray.\n"
+          "\t */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (setq tab-width 4)
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (search-forward "Charlie")
+        (fancy-fill-paragraph)
+        (should (equal text-initial (buffer-string)))))))
+
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-tab-indent-noop-prefix ()
+  "C-mode block comment with tab indent and dot-points should be unchanged."
+  (let ((fill-column 80)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "X\t/* Alpha bravo.\n"
+          "\t *\n"
+          "\t * Charlie delta echo:\n"
+          "\t * - Foxtrot golf hotel india juliet kilo,\n"
+          "\t *   lima mike november oscar papa quebec romeo sierra.\n"
+          "\t * - Tango uniform victor whiskey xray yankee zulu alpha,\n"
+          "\t *   bravo charlie delta echo foxtrot golf hotel india.\n"
+          "\t * - Victor whiskey xray.\n"
+          "\t */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (setq tab-width 4)
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (search-forward "Charlie")
+        (fancy-fill-paragraph)
+        (should (equal text-initial (buffer-string)))))))
+
+
 (ert-deftest fill-syntax-bounds-c-mode-javadoc-inline-wrap ()
   "C-mode Javadoc inline comment with `/**' opener should preserve the opener."
   (let ((fill-column 72)
@@ -2672,11 +2918,14 @@
           "/*\n"
           " * Overview of the algorithm:\n"
           " *\n"
-          " * * Alpha bravo charlie delta echo foxtrot golf\n"
-          " *   hotel india.\n"
-          " * * Juliet kilo lima mike november oscar papa\n"
+          " * * Alpha bravo charlie\n"
+          " *   delta echo foxtrot\n"
+          " *   golf hotel india.\n"
+          " * * Juliet kilo lima mike\n"
+          " *   november oscar papa\n"
           " *   quebec romeo sierra.\n"
-          " * * Tango uniform victor whiskey xray yankee\n"
+          " * * Tango uniform victor\n"
+          " *   whiskey xray yankee\n"
           " *   zulu.\n"
           " */")))
     (with-temp-buffer
@@ -2688,7 +2937,7 @@
         (should (equal text-expected (buffer-string)))))))
 
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-dash-prefix ()
-  "C-mode block comment with alternative `c-block-comment-prefix' set to dash."
+  "C-mode block comment with alternative `c-block-comment-prefix' set to dash, only first paragraph fills."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
         (sentence-end-double-space nil)
@@ -2706,10 +2955,8 @@
           " - Alpha bravo charlie delta echo\n"
           " - foxtrot golf hotel.\n"
           " -\n"
-          " - - Juliet kilo lima mike november\n"
-          " -   oscar papa quebec.\n"
-          " - - Romeo sierra tango uniform victor\n"
-          " -   whiskey xray.\n"
+          " - - Juliet kilo lima mike november oscar papa quebec.\n"
+          " - - Romeo sierra tango uniform victor whiskey xray.\n"
           " */")))
     (with-temp-buffer
       (c-mode)
@@ -2721,7 +2968,7 @@
         (should (equal text-expected (buffer-string)))))))
 
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-multi-paragraph ()
-  "C-mode block comment with blank `*' lines should preserve separate paragraphs."
+  "C-mode block comment with blank `*' lines, cursor in first paragraph fills only that paragraph."
   (let ((fill-column 80)
         (fancy-fill-paragraph-syntax-bounds t)
         (sentence-end-double-space nil)
@@ -2751,11 +2998,13 @@
           "     * (since it assumes #BLOCK_LOOP menus close via `menuretval`).\n"
           "     * With #BLOCK_KEEP_OPEN set this doesn't happen.\n"
           "     *\n"
-          "     * An alternative would be to ensure the popup state always matches the\n"
-          "     * initial state, however this ends up involving assumptions which may not\n"
-          "     * hold in *every* case, so triggering a refresh is a reasonable solution.\n"
+          "     * An alternative would be to ensure the popup state always matches\n"
+          "     * the initial state, however this ends up involving assumptions\n"
+          "     * which may not hold in *every* case,\n"
+          "     * so triggering a refresh is a reasonable solution.\n"
           "     * A refresh also occurs when moving the cursor between buttons,\n"
-          "     * so it's expected to be fast. see #155320.\n"
+          "     * so it's expected\n"
+          "     * to be fast. see #155320.\n"
           "     */")))
     (with-temp-buffer
       (c-mode)
@@ -2828,7 +3077,7 @@
       (should (equal text-expected (buffer-string))))))
 
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-numbered-list ()
-  "Numbered list inside a C block comment should fill each item independently."
+  "Numbered list inside a C block comment, cursor in heading paragraph leaves list unchanged."
   (let ((fill-column 40)
         (fancy-fill-paragraph-syntax-bounds t)
         (sentence-end-double-space nil)
@@ -2846,10 +3095,8 @@
           "/*\n"
           " * Steps:\n"
           " *\n"
-          " * 1. Alpha bravo charlie delta echo\n"
-          " *    foxtrot golf.\n"
-          " * 2. Hotel india juliet kilo lima mike\n"
-          " *    november.\n"
+          " * 1. Alpha bravo charlie delta echo foxtrot golf.\n"
+          " * 2. Hotel india juliet kilo lima mike november.\n"
           " */")))
     (with-temp-buffer
       (c-mode)
@@ -2894,6 +3141,270 @@
       (goto-char (point-min))
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-isolate-first-paragraph ()
+  "Cursor in first paragraph should not fill the second paragraph."
+  (let ((fill-column 60)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/* Alpha bravo charlie\n"
+          " * delta echo foxtrot.\n"
+          " * Golf hotel india.\n"
+          " *\n"
+          " * Kilo lima mike\n"
+          " * november oscar papa.\n"
+          " * Quebec romeo sierra.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/* Alpha bravo charlie\n"
+          " * delta echo foxtrot. Golf hotel india.\n"
+          " *\n"
+          " * Kilo lima mike\n"
+          " * november oscar papa.\n"
+          " * Quebec romeo sierra.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (search-forward "echo")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-isolate-second-paragraph ()
+  "Cursor in second paragraph should not fill the first paragraph."
+  (let ((fill-column 60)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/* Alpha bravo charlie\n"
+          " * delta echo foxtrot.\n"
+          " * Golf hotel india.\n"
+          " *\n"
+          " * Kilo lima mike\n"
+          " * november oscar papa.\n"
+          " * Quebec romeo sierra.\n"
+          " */"))
+        ;; NOTE: the second paragraph fits on one line at fill-column 60.
+        (text-expected
+         (concat
+          "/* Alpha bravo charlie\n"
+          " * delta echo foxtrot.\n"
+          " * Golf hotel india.\n"
+          " *\n"
+          " * Kilo lima mike november oscar papa. Quebec romeo sierra.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (search-forward "oscar")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-markdown-star-bold-dot-points ()
+  "Markdown `* **Bold:**' dot-point list should fill each item independently."
+  (let
+      ((fill-column 120)
+       (sentence-end-double-space nil)
+       (fancy-fill-paragraph-dot-point-prefix (list "- " "* " '(:regexp . "[0-9]+\\. ")))
+       (text-initial
+        (concat
+         "* **Permissions:** The \"Allow edits from maintainers\" checkbox must be enabled on the PR.\n"
+         "* **Access:** You must have Write or Admin access to the destination (upstream) repository.\n"
+         "* **Authentication:** Use your own Gitea credentials; the system validates your maintainer status to allow the push to the fork."))
+       (text-expected
+        (concat
+         "* **Permissions:** The \"Allow edits from maintainers\" checkbox must be enabled on the PR.\n"
+         "* **Access:** You must have Write or Admin access to the destination (upstream) repository.\n"
+         "* **Authentication:** Use your own Gitea credentials;\n"
+         "  the system validates your maintainer status to allow the push to the fork.")))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char (point-max))
+      (beginning-of-line)
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
+(ert-deftest fill-syntax-bounds-python-string-cursor-first-paragraph ()
+  "Filling first paragraph of a Python triple-quoted string should not touch the second."
+  (let ((fill-column 40)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    \"\"\"\n"
+          "    Alpha bravo charlie delta\n"
+          "    echo foxtrot golf.\n"
+          "    Hotel india juliet.\n"
+          "\n"
+          "    Kilo lima mike november\n"
+          "    oscar papa quebec.\n"
+          "    Romeo sierra tango.\n"
+          "    \"\"\""))
+        (text-expected
+         (concat
+          "    \"\"\"\n"
+          "    Alpha bravo charlie delta echo\n"
+          "    foxtrot golf. Hotel india juliet.\n"
+          "\n"
+          "    Kilo lima mike november\n"
+          "    oscar papa quebec.\n"
+          "    Romeo sierra tango.\n"
+          "    \"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "Alpha")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-string-cursor-second-paragraph ()
+  "Filling second paragraph of a Python triple-quoted string should not touch the first."
+  (let ((fill-column 40)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    \"\"\"\n"
+          "    Alpha bravo charlie delta\n"
+          "    echo foxtrot golf.\n"
+          "    Hotel india juliet.\n"
+          "\n"
+          "    Kilo lima mike november\n"
+          "    oscar papa quebec.\n"
+          "    Romeo sierra tango.\n"
+          "    \"\"\""))
+        (text-expected
+         (concat
+          "    \"\"\"\n"
+          "    Alpha bravo charlie delta\n"
+          "    echo foxtrot golf.\n"
+          "    Hotel india juliet.\n"
+          "\n"
+          "    Kilo lima mike november oscar papa\n"
+          "    quebec. Romeo sierra tango.\n"
+          "    \"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "oscar")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-region-middle-paragraphs ()
+  "Active region spanning middle 3 of 5 paragraphs should fill only those 3."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/*\n"
+          " * Aaa bbb ccc\n"
+          " * ddd eee fff.\n"
+          " *\n"
+          " * Ggg hhh iii\n"
+          " * jjj kkk lll.\n"
+          " *\n"
+          " * Mmm nnn ooo\n"
+          " * ppp qqq rrr.\n"
+          " *\n"
+          " * Sss ttt uuu\n"
+          " * vvv www xxx.\n"
+          " *\n"
+          " * Yyy zzz aaa\n"
+          " * bbb ccc ddd.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/*\n"
+          " * Aaa bbb ccc\n"
+          " * ddd eee fff.\n"
+          " *\n"
+          " * Ggg hhh iii jjj kkk lll.\n"
+          " *\n"
+          " * Mmm nnn ooo ppp qqq rrr.\n"
+          " *\n"
+          " * Sss ttt uuu vvv www xxx.\n"
+          " *\n"
+          " * Yyy zzz aaa\n"
+          " * bbb ccc ddd.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        ;; Select paragraphs 2-4 (skip first and last).
+        (goto-char (point-min))
+        (search-forward "Ggg")
+        (set-mark (point))
+        (search-forward "xxx.")
+        (activate-mark)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-string-region-middle-paragraphs ()
+  "Active region spanning middle 3 of 5 paragraphs should fill only those 3."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    \"\"\"\n"
+          "    Aaa bbb ccc\n"
+          "    ddd eee fff.\n"
+          "\n"
+          "    Ggg hhh iii\n"
+          "    jjj kkk lll.\n"
+          "\n"
+          "    Mmm nnn ooo\n"
+          "    ppp qqq rrr.\n"
+          "\n"
+          "    Sss ttt uuu\n"
+          "    vvv www xxx.\n"
+          "\n"
+          "    Yyy zzz aaa\n"
+          "    bbb ccc ddd.\n"
+          "    \"\"\""))
+        (text-expected
+         (concat
+          "    \"\"\"\n"
+          "    Aaa bbb ccc\n"
+          "    ddd eee fff.\n"
+          "\n"
+          "    Ggg hhh iii jjj kkk lll.\n"
+          "\n"
+          "    Mmm nnn ooo ppp qqq rrr.\n"
+          "\n"
+          "    Sss ttt uuu vvv www xxx.\n"
+          "\n"
+          "    Yyy zzz aaa\n"
+          "    bbb ccc ddd.\n"
+          "    \"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        ;; Select paragraphs 2-4 (skip first and last).
+        (goto-char (point-min))
+        (search-forward "Ggg")
+        (set-mark (point))
+        (search-forward "xxx.")
+        (activate-mark)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
 
 ;; Local Variables:
 ;; fill-column: 99
