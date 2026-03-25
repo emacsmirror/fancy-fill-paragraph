@@ -3406,6 +3406,162 @@
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-comment-cursor-in-class-body ()
+  "Filling a Python comment block inside a class body should not spill into code."
+  (let ((fill-column 72)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "class _Global:\n"
+          "    # While not expected, failure to parse a single signature should not\n"
+          "    # cause all stub generation to fail.\n"
+          "    # These should be treated as bugs and fixed.\n"
+          "    parse_errors: int = 0\n"))
+        (text-expected
+         (concat
+          "class _Global:\n"
+          "    # While not expected, failure to parse a single signature\n"
+          "    # should not cause all stub generation to fail.\n"
+          "    # These should be treated as bugs and fixed.\n"
+          "    parse_errors: int = 0\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "should not")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comment-single-long-line-wraps ()
+  "A single long Python comment line should wrap without spilling into code."
+  (let ((fill-column 72)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "class Foo:\n"
+          "    # While not expected, failure to parse a single signature"
+          " should not cause all stub generation to fail,"
+          " these should be treated as bugs and fixed.\n"
+          "    parse_errors: int = 0\n"))
+        (text-expected
+         (concat
+          "class Foo:\n"
+          "    # While not expected, failure to parse a single signature\n"
+          "    # should not cause all stub generation to fail,\n"
+          "    # these should be treated as bugs and fixed.\n"
+          "    parse_errors: int = 0\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "failure")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comment-five-lines-cursor-last ()
+  "Filling five Python comment lines with cursor on the last should refill the block."
+  (let ((fill-column 72)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "class Foo:\n"
+          "    # Alpha bravo charlie delta echo foxtrot golf hotel india\n"
+          "    # juliet kilo lima mike november oscar papa quebec romeo\n"
+          "    # sierra tango uniform victor whiskey xray yankee zulu\n"
+          "    # alpha bravo charlie delta echo foxtrot golf hotel.\n"
+          "    # India juliet kilo lima.\n"
+          "    parse_errors: int = 0\n"))
+        (text-expected
+         (concat
+          "class Foo:\n"
+          "    # Alpha bravo charlie delta echo foxtrot golf hotel india juliet\n"
+          "    # kilo lima mike november oscar papa quebec romeo sierra tango\n"
+          "    # uniform victor whiskey xray yankee zulu alpha bravo charlie delta\n"
+          "    # echo foxtrot golf hotel. India juliet kilo lima.\n"
+          "    parse_errors: int = 0\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "India juliet")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comment-five-lines-cursor-first ()
+  "Filling five Python comment lines with cursor on the first should refill the block."
+  (let ((fill-column 72)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "class Foo:\n"
+          "    # Alpha bravo charlie delta echo foxtrot golf hotel india\n"
+          "    # juliet kilo lima mike november oscar papa quebec romeo\n"
+          "    # sierra tango uniform victor whiskey xray yankee zulu\n"
+          "    # alpha bravo charlie delta echo foxtrot golf hotel.\n"
+          "    # India juliet kilo lima.\n"
+          "    parse_errors: int = 0\n"))
+        (text-expected
+         (concat
+          "class Foo:\n"
+          "    # Alpha bravo charlie delta echo foxtrot golf hotel india juliet\n"
+          "    # kilo lima mike november oscar papa quebec romeo sierra tango\n"
+          "    # uniform victor whiskey xray yankee zulu alpha bravo charlie delta\n"
+          "    # echo foxtrot golf hotel. India juliet kilo lima.\n"
+          "    parse_errors: int = 0\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "Alpha")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comment-five-lines-cursor-at-hash ()
+  "Filling with cursor on the `#' character itself should still fill correctly."
+  (let ((fill-column 72)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "class Foo:\n"
+          "    # Alpha bravo charlie delta echo foxtrot golf hotel india\n"
+          "    # juliet kilo lima mike november oscar papa quebec romeo\n"
+          "    # sierra tango uniform victor whiskey xray yankee zulu\n"
+          "    # alpha bravo charlie delta echo foxtrot golf hotel.\n"
+          "    # India juliet kilo lima.\n"
+          "    parse_errors: int = 0\n"))
+        (text-expected
+         (concat
+          "class Foo:\n"
+          "    # Alpha bravo charlie delta echo foxtrot golf hotel india juliet\n"
+          "    # kilo lima mike november oscar papa quebec romeo sierra tango\n"
+          "    # uniform victor whiskey xray yankee zulu alpha bravo charlie delta\n"
+          "    # echo foxtrot golf hotel. India juliet kilo lima.\n"
+          "    parse_errors: int = 0\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        ;; Position cursor directly on the # of the third comment line.
+        (forward-line 3)
+        (back-to-indentation)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 ;; Local Variables:
 ;; fill-column: 99
 ;; indent-tabs-mode: nil

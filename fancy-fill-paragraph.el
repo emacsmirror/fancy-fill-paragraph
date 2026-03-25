@@ -262,6 +262,21 @@ or nil when outside both."
   (declare (important-return-value t))
   (nth 8 ppss))
 
+(defun fancy-fill-paragraph--comment-or-string-start-at (pos)
+  "Return the comment or string start position for POS, or nil.
+Probes `syntax-ppss' at POS and, when that yields nothing, at
+POS+1 so that a cursor directly on a comment-start character
+\(e.g. `#') or string delimiter is still detected."
+  (declare (important-return-value t))
+  (save-excursion
+    (or (fancy-fill-paragraph--ppss-start (syntax-ppss pos))
+        (cond
+         ((< pos (point-max))
+          (let ((beg (fancy-fill-paragraph--ppss-start (syntax-ppss (1+ pos)))))
+            (and beg (<= beg pos) beg)))
+         (t
+          nil)))))
+
 (defsubst fancy-fill-paragraph--syntax-string-delimiter-p (syn-descriptor)
   "Return non-nil if SYN-DESCRIPTOR is a string delimiter.
 SYN-DESCRIPTOR may be nil, in which case nil is returned."
@@ -536,7 +551,7 @@ first output line (e.g. for a comment opener like \"/** \")."
       (setq beg (pos-bol))
       (cons beg end))))
 
-(defun fancy-fill-paragraph--syntax-body-bounds (beg end)
+(defun fancy-fill-paragraph--comment-or-string-body-bounds (beg end)
   "Return body bounds between separate-line delimiters, or nil.
 BEG and END are the full region bounds (from `pos-bol' of the opener
 to `pos-eol' of the closer).  When the first and last lines contain
@@ -559,14 +574,99 @@ not block comments."
   (and (not (eq (char-before) ?\n))
        (fancy-fill-paragraph--syntax-comment-end-class-p (syntax-after (1- (point))))))
 
-(defun fancy-fill-paragraph--syntax-regions (beg end pos)
+(defun fancy-fill-paragraph--line-comment-indent-col (comment-pos)
+  "Return the column of the comment character at COMMENT-POS."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char comment-pos)
+    (current-column)))
+
+(defun fancy-fill-paragraph--line-comment-at-col-p (indent-col)
+  "Return non-nil when the current line has a line comment at INDENT-COL."
+  (declare (important-return-value t))
+  (save-excursion
+    (move-to-column indent-col)
+    (let ((syn (syntax-after (point))))
+      ;; Class 11 = comment-start.
+      (and syn (= (syntax-class syn) 11)))))
+
+(defun fancy-fill-paragraph--line-comment-bounds (opener-pos beg end)
+  "Return (BLOCK-BEG . BLOCK-END) for consecutive line comments around OPENER-POS.
+OPENER-POS is the comment-start of the line comment at point.
+BEG and END bound the search.  Only lines whose comment character
+starts at the same column as OPENER-POS are included."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char opener-pos)
+    (let ((indent-col (fancy-fill-paragraph--line-comment-indent-col opener-pos))
+          (block-beg (pos-bol))
+          (block-end (pos-eol)))
+      ;; Scan backward.
+      (while (and (zerop (forward-line -1))
+                  (>= (point) beg)
+                  (fancy-fill-paragraph--line-comment-at-col-p indent-col))
+        (setq block-beg (pos-bol)))
+      ;; Scan forward.
+      (goto-char opener-pos)
+      (while (and (zerop (forward-line 1))
+                  (<= (point) end)
+                  (fancy-fill-paragraph--line-comment-at-col-p indent-col))
+        (setq block-end (pos-eol)))
+      (cons block-beg block-end))))
+
+(defun fancy-fill-paragraph--line-comment-prefix (opener-pos)
+  "Return the continuation prefix for the line comment at OPENER-POS.
+The prefix includes leading indentation, comment delimiter characters,
+and one trailing space when present."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char opener-pos)
+    ;; Skip comment delimiter characters (e.g. \"#\", \";;\").
+    ;; Syntax class `<' (comment-start) matches only the delimiter,
+    ;; unlike a character-class skip which would consume content too.
+    (skip-syntax-forward "<")
+    ;; Include trailing whitespace after the delimiter.
+    (skip-chars-forward " \t" (pos-eol))
+    (buffer-substring-no-properties (pos-bol) (point))))
+
+(defun fancy-fill-paragraph--fill-line-comment-body (body-beg body-end cont-prefix)
+  "Fill a line-comment paragraph from BODY-BEG to BODY-END using CONT-PREFIX."
+  (let* ((prefix-col (string-width cont-prefix))
+         (strip-end (min (1+ body-end) (point-max)))
+         (result
+          (fancy-fill-paragraph--fill-and-reprefix
+           (fancy-fill-paragraph--strip-region-lines body-beg strip-end prefix-col)
+           (max 1 (- fill-column prefix-col))
+           cont-prefix)))
+    (when result
+      (fancy-fill-paragraph--replace-region body-beg body-end result))))
+
+(defun fancy-fill-paragraph--fill-line-comment-region
+    (beg end opener-pos &optional sel-beg sel-end)
+  "Fill a line-comment block in the region BEG..END.
+OPENER-POS is the buffer position of a comment character in the block.
+When SEL-BEG and SEL-END are non-nil, fill only paragraphs
+overlapping that selection.  Otherwise fill the paragraph at point."
+  (let ((pos (point)))
+    (save-excursion
+      (let* ((cont-prefix (fancy-fill-paragraph--line-comment-prefix opener-pos))
+             (prefix-col (string-width cont-prefix))
+             (changed nil))
+        (dolist (para
+                 (fancy-fill-paragraph--body-paragraph-bounds
+                  beg end prefix-col (or sel-beg pos) (or sel-end pos)))
+          (when (fancy-fill-paragraph--fill-line-comment-body (car para) (cdr para) cont-prefix)
+            (setq changed t)))
+        changed))))
+
+(defun fancy-fill-paragraph--comment-or-string-regions (beg end pos)
   "Return list of (BEG END FILL-FN) for each syntax region in BEG..END.
 POS is the cursor position, used to detect when point is inside a
 comment or string whose opener precedes BEG.
 Each entry spans from `pos-bol' of the opener to `pos-eol' of the closer.
-Block comments include the opener position as a fourth element.
-Line-style comments are skipped so they fall through to normal paragraph
-filling.  Returns nil when no syntax boundaries are found."
+Block comments and line-comment blocks include the opener position
+as a fourth element.
+Returns nil when no syntax boundaries are found."
   (declare (important-return-value t))
   (save-excursion
     ;; Ensure syntax properties are set for the entire region.
@@ -580,8 +680,8 @@ filling.  Returns nil when no syntax boundaries are found."
       ;; extend beyond the syntax region (e.g. code surrounds the
       ;; comment).
       (let ((syn-start
-             (or (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss)))
-                 (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss pos))))))
+             (or (fancy-fill-paragraph--comment-or-string-start-at (point))
+                 (fancy-fill-paragraph--comment-or-string-start-at pos))))
         (when syn-start
           (goto-char syn-start)))
       (while (< (point) end)
@@ -593,13 +693,25 @@ filling.  Returns nil when no syntax boundaries are found."
             (cond
              ;; Try advancing over a comment.
              ((forward-comment 1)
-              (when (fancy-fill-paragraph--syntax-comment-end-p)
+              (cond
+               ;; Block comment.
+               ((fancy-fill-paragraph--syntax-comment-end-p)
                 (push (list
                        region-line-beg
                        (pos-eol)
                        #'fancy-fill-paragraph--fill-block-comment-region
                        opener-pos)
-                      regions)))
+                      regions))
+               ;; Line comment — find the full block and skip past it.
+               (t
+                (let ((bounds (fancy-fill-paragraph--line-comment-bounds opener-pos beg end)))
+                  (push (list
+                         (car bounds)
+                         (cdr bounds)
+                         #'fancy-fill-paragraph--fill-line-comment-region
+                         opener-pos)
+                        regions)
+                  (goto-char (1+ (cdr bounds)))))))
              ;; Not a comment; check for a string delimiter.
              ((fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after (point)))
               (condition-case nil
@@ -686,8 +798,9 @@ can fill later paragraphs first without invalidating earlier positions."
     (goto-char body-beg)
     (let ((result nil)
           (para-beg nil)
-          (para-end nil))
-      (while (<= (point) body-end)
+          (para-end nil)
+          (done nil))
+      (while (and (not done) (<= (point) body-end))
         (let ((separator-p
                (save-excursion
                  (move-to-column prefix-col)
@@ -705,7 +818,7 @@ can fill later paragraphs first without invalidating earlier positions."
           ;; Last line: close any open paragraph and exit.
           (when (and para-beg (not para-end))
             (setq para-end (min (pos-eol) body-end)))
-          (goto-char (1+ body-end)))
+          (setq done t))
          (t
           (forward-line 1)))
         ;; Flush completed paragraph if it overlaps the selection.
@@ -723,9 +836,9 @@ can fill later paragraphs first without invalidating earlier positions."
      ((fancy-fill-paragraph--block-comment-body-prefix-matches-p body-beg body-end cont-prefix)
       (let ((result
              (fancy-fill-paragraph--fill-and-reprefix
-              (fancy-fill-paragraph--strip-region-lines body-beg (1+ body-end) prefix-col)
-              (max 1 (- fill-column prefix-col))
-              cont-prefix)))
+              (fancy-fill-paragraph--strip-region-lines
+               body-beg (min (1+ body-end) (point-max)) prefix-col)
+              (max 1 (- fill-column prefix-col)) cont-prefix)))
         (when result
           (fancy-fill-paragraph--replace-region body-beg body-end result))))
      (t
@@ -828,7 +941,7 @@ prefix, fills, then restores the opener."
               (progn
                 (goto-char comment-start-pos)
                 (current-column)))
-             (body (fancy-fill-paragraph--syntax-body-bounds beg end))
+             (body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
              (cont-prefix
               (fancy-fill-paragraph--block-comment-continuation-prefix
                beg body opener-col comment-start-pos)))
@@ -857,7 +970,7 @@ When the delimiters occupy their own lines, fills only the body text
 between them.  When the delimiters share lines with body text (inline
 delimiters), fills the entire region, treating the delimiters as part
 of the text."
-  (let ((body (fancy-fill-paragraph--syntax-body-bounds beg end)))
+  (let ((body (fancy-fill-paragraph--comment-or-string-body-bounds beg end)))
     (cond
      (body
       (let ((changed nil))
@@ -1508,8 +1621,8 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
       ;; When the selection is entirely inside a single comment or string,
       ;; use syntax-aware filling so prefixes (e.g. ` * ') are handled.
       (syntax-propertize end)
-      (let* ((beg-syn (fancy-fill-paragraph--ppss-start (syntax-ppss beg)))
-             (end-syn (fancy-fill-paragraph--ppss-start (syntax-ppss end)))
+      (let* ((beg-syn (fancy-fill-paragraph--comment-or-string-start-at beg))
+             (end-syn (fancy-fill-paragraph--comment-or-string-start-at end))
              (syn-start
               (and fancy-fill-paragraph-syntax-bounds
                    beg-syn
@@ -1529,6 +1642,17 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
                     (fancy-fill-paragraph--fill-block-comment-region region-beg (pos-eol) syn-start
                                                                      beg
                                                                      end)))
+             ;; Line comment: find the full block and fill the selection.
+             ((progn
+                (goto-char syn-start)
+                (and (forward-comment 1) (not (fancy-fill-paragraph--syntax-comment-end-p))))
+              (let ((bounds
+                     (fancy-fill-paragraph--line-comment-bounds
+                      syn-start (point-min) (point-max))))
+                (setq changed
+                      (fancy-fill-paragraph--fill-line-comment-region
+                       (car bounds) (cdr bounds) syn-start
+                       beg end))))
              ;; String: advance past closer via forward-sexp.
              ((progn
                 (goto-char syn-start)
@@ -1536,6 +1660,21 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
               (forward-sexp 1)
               (setq changed
                     (fancy-fill-paragraph--fill-string-region region-beg (pos-eol) beg end))))))
+         ;; Selection spans multiple line comments at the same indent:
+         ;; beg-syn and end-syn differ but both are line comments.
+         ((and fancy-fill-paragraph-syntax-bounds
+               beg-syn end-syn
+               (save-excursion
+                 (goto-char beg-syn)
+                 (and (forward-comment 1) (not (fancy-fill-paragraph--syntax-comment-end-p))))
+               (= (fancy-fill-paragraph--line-comment-indent-col beg-syn)
+                  (fancy-fill-paragraph--line-comment-indent-col end-syn)))
+          (let ((bounds
+                 (fancy-fill-paragraph--line-comment-bounds beg-syn (point-min) (point-max))))
+            (setq changed
+                  (fancy-fill-paragraph--fill-line-comment-region (car bounds) (cdr bounds) beg-syn
+                                                                  beg
+                                                                  end))))
          (t
           (fancy-fill-paragraph--fill-paragraph-bounds
            (fancy-fill-paragraph--collect-paragraph-bounds beg end t))
@@ -1561,7 +1700,7 @@ Returns non-nil when the buffer was modified."
          (end (cdr bounds))
          (sub-regions
           (when fancy-fill-paragraph-syntax-bounds
-            (fancy-fill-paragraph--syntax-regions beg end (point)))))
+            (fancy-fill-paragraph--comment-or-string-regions beg end (point)))))
     (cond
      (sub-regions
       ;; Fill each region independently, in reverse order so
