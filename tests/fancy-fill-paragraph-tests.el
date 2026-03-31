@@ -2738,9 +2738,8 @@
           " */"))
         (text-expected
          (concat
-          "/* Alpha bravo charlie delta\n"
-          " * echo foxtrot golf.\n"
-          " * Hotel india juliet.\n"
+          "/* Alpha bravo charlie delta echo\n"
+          " * foxtrot golf. Hotel india juliet.\n"
           " *\n"
           " * Kilo lima mike november\n"
           " * oscar papa quebec.\n"
@@ -3159,8 +3158,7 @@
           " */"))
         (text-expected
          (concat
-          "/* Alpha bravo charlie\n"
-          " * delta echo foxtrot. Golf hotel india.\n"
+          "/* Alpha bravo charlie delta echo foxtrot. Golf hotel india.\n"
           " *\n"
           " * Kilo lima mike\n"
           " * november oscar papa.\n"
@@ -3559,6 +3557,226 @@
         ;; Position cursor directly on the # of the third comment line.
         (forward-line 3)
         (back-to-indentation)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-opener-text-region-middle ()
+  "Active region in a middle paragraph should not refill the opener paragraph."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/* Alpha bravo charlie delta\n"
+          " * echo foxtrot golf.\n"
+          " *\n"
+          " * Kilo lima mike\n"
+          " * november oscar\n"
+          " * papa quebec.\n"
+          " *\n"
+          " * Romeo sierra tango.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/* Alpha bravo charlie delta\n"
+          " * echo foxtrot golf.\n"
+          " *\n"
+          " * Kilo lima mike november oscar papa quebec.\n"
+          " *\n"
+          " * Romeo sierra tango.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "Kilo")
+        (set-mark (point))
+        (search-forward "quebec.")
+        (activate-mark)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-opener-text-cursor-middle ()
+  "Cursor in a middle paragraph should not refill the opener paragraph."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "/* Alpha bravo charlie delta\n"
+          " * echo foxtrot golf.\n"
+          " *\n"
+          " * Kilo lima mike\n"
+          " * november oscar\n"
+          " * papa quebec.\n"
+          " *\n"
+          " * Romeo sierra tango.\n"
+          " */"))
+        (text-expected
+         (concat
+          "/* Alpha bravo charlie delta\n"
+          " * echo foxtrot golf.\n"
+          " *\n"
+          " * Kilo lima mike november oscar papa quebec.\n"
+          " *\n"
+          " * Romeo sierra tango.\n"
+          " */")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "november")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-string-opener-text-cursor-first-paragraph ()
+  "Filling first paragraph of a triple-quoted string with opener text should merge it."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    \"\"\"Alpha bravo\n"
+          "    charlie delta echo\n"
+          "    foxtrot golf hotel.\n"
+          "    India juliet kilo.\n"
+          "    \"\"\""))
+        (text-expected
+         (concat
+          "    \"\"\"Alpha bravo charlie delta echo foxtrot golf\n"
+          "    hotel. India juliet kilo.\n"
+          "    \"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "charlie")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-string-opener-text-cursor-second-paragraph ()
+  "Cursor in second paragraph should not refill the opener paragraph."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    \"\"\"Alpha bravo charlie\n"
+          "    delta echo foxtrot.\n"
+          "\n"
+          "    Golf hotel india\n"
+          "    juliet kilo lima.\n"
+          "    \"\"\""))
+        (text-expected
+         (concat
+          "    \"\"\"Alpha bravo charlie\n"
+          "    delta echo foxtrot.\n"
+          "\n"
+          "    Golf hotel india juliet kilo lima.\n"
+          "    \"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "hotel")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-r-string-opener-text ()
+  "Prefixed r-string with opener text should merge opener into first paragraph."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    r\"\"\"Alpha bravo\n"
+          "    charlie delta echo\n"
+          "    foxtrot golf hotel.\n"
+          "    India juliet kilo.\n"
+          "    \"\"\""))
+        (text-expected
+         (concat
+          "    r\"\"\"Alpha bravo charlie delta echo foxtrot golf\n"
+          "    hotel. India juliet kilo.\n"
+          "    \"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "charlie")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-f-string-opener-text-cursor-second-paragraph ()
+  "Cursor in second paragraph of f-string should not refill opener paragraph."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "    f\"\"\"Alpha bravo charlie\n"
+          "    delta echo foxtrot.\n"
+          "\n"
+          "    Golf hotel india\n"
+          "    juliet kilo lima.\n"
+          "    \"\"\""))
+        (text-expected
+         (concat
+          "    f\"\"\"Alpha bravo charlie\n"
+          "    delta echo foxtrot.\n"
+          "\n"
+          "    Golf hotel india juliet kilo lima.\n"
+          "    \"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "hotel")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-r-string-opener-text-region-second-paragraph ()
+  "Active region in second paragraph of r-string should not refill opener paragraph."
+  (let ((fill-column 50)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "r\"\"\"Alpha bravo charlie\n"
+          "delta echo foxtrot.\n"
+          "\n"
+          "Golf hotel india\n"
+          "juliet kilo lima.\n"
+          "\"\"\""))
+        (text-expected
+         (concat
+          "r\"\"\"Alpha bravo charlie\n"
+          "delta echo foxtrot.\n"
+          "\n"
+          "Golf hotel india juliet kilo lima.\n"
+          "\"\"\"")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "Golf")
+        (set-mark (point))
+        (search-forward "lima.")
+        (activate-mark)
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 

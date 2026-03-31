@@ -154,7 +154,7 @@ otherwise the default :weight from ENTRY."
       (or (plist-get entry :weight) 0)))))
 
 (defsubst fancy-fill-paragraph--leading-indent (str)
-  "Return the number of leading whitespace characters in STR."
+  "Return the number of leading blank-space characters in STR."
   (declare (important-return-value t))
   (string-match "\\`[ \t]*" str)
   (match-end 0))
@@ -171,7 +171,7 @@ Either or both may be nil."
 
 (defun fancy-fill-paragraph--extract-body-indent (pos opener-col)
   "Extract indentation characters from the line at POS up to OPENER-COL.
-Preserves the actual whitespace (tabs or spaces) from the buffer
+Preserves the actual blank-space (tabs or spaces) from the buffer
 rather than synthesizing spaces from the column width."
   (declare (important-return-value t))
   (save-excursion
@@ -195,7 +195,7 @@ rather than synthesizing spaces from the column width."
     (pos-bol)))
 
 (defsubst fancy-fill-paragraph--string-blank-or-empty-p (str)
-  "Return non-nil if STR is empty or contains only whitespace and newlines."
+  "Return non-nil if STR is empty or contains only blank-space and newlines."
   (declare (important-return-value t))
   (string-match-p "\\`[ \t\n]*\\'" str))
 
@@ -495,7 +495,7 @@ with paragraph separators preserved.
 When SUPPRESS-PREFIX is non-nil, set `fill-prefix' to the empty string
 so `fill-context-prefix' detection is suppressed."
   (declare (important-return-value t))
-  ;; Nothing to fill when text is empty or whitespace-only.
+  ;; Nothing to fill when text is empty or blank-space-only.
   (cond
    ((fancy-fill-paragraph--string-blank-or-empty-p text)
     text)
@@ -515,7 +515,7 @@ FIRST-PREFIX, when non-nil, is used instead of CONT-PREFIX on the
 first output line (e.g. for a comment opener like \"/** \")."
   (declare (important-return-value t))
   (let ((stripped-text (mapconcat #'identity lines "\n")))
-    ;; Return nil when stripped text is empty or whitespace-only.
+    ;; Return nil when stripped text is empty or blank-space-only.
     (cond
      ((fancy-fill-paragraph--string-blank-or-empty-p stripped-text)
       nil)
@@ -552,11 +552,14 @@ first output line (e.g. for a comment opener like \"/** \")."
       (cons beg end))))
 
 (defun fancy-fill-paragraph--comment-or-string-body-bounds (beg end)
-  "Return body bounds between separate-line delimiters, or nil.
+  "Return inner body bounds between delimiter lines, or nil.
 BEG and END are the full region bounds (from `pos-bol' of the opener
-to `pos-eol' of the closer).  When the first and last lines contain
-only delimiters, return (BODY-BEG . BODY-END) for the lines between
-them.  Otherwise return nil, indicating inline delimiters."
+to `pos-eol' of the closer).  Returns (BODY-BEG . BODY-END) spanning
+from the first line after the opener to the last line before the closer,
+or nil when there are no lines between them (single-line region).
+Note: this returns the raw inner body regardless of whether the opener
+line carries text.  Callers that need to include opener-line text in
+paragraph scanning should widen the returned bounds themselves."
   (declare (important-return-value t))
   (save-excursion
     ;; End of the last body line (line before the closer).
@@ -625,21 +628,9 @@ and one trailing space when present."
     ;; Syntax class `<' (comment-start) matches only the delimiter,
     ;; unlike a character-class skip which would consume content too.
     (skip-syntax-forward "<")
-    ;; Include trailing whitespace after the delimiter.
+    ;; Include trailing blank-space after the delimiter.
     (skip-chars-forward " \t" (pos-eol))
     (buffer-substring-no-properties (pos-bol) (point))))
-
-(defun fancy-fill-paragraph--fill-line-comment-body (body-beg body-end cont-prefix)
-  "Fill a line-comment paragraph from BODY-BEG to BODY-END using CONT-PREFIX."
-  (let* ((prefix-col (string-width cont-prefix))
-         (strip-end (min (1+ body-end) (point-max)))
-         (result
-          (fancy-fill-paragraph--fill-and-reprefix
-           (fancy-fill-paragraph--strip-region-lines body-beg strip-end prefix-col)
-           (max 1 (- fill-column prefix-col))
-           cont-prefix)))
-    (when result
-      (fancy-fill-paragraph--replace-region body-beg body-end result))))
 
 (defun fancy-fill-paragraph--fill-line-comment-region
     (beg end opener-pos &optional sel-beg sel-end)
@@ -650,14 +641,11 @@ overlapping that selection.  Otherwise fill the paragraph at point."
   (let ((pos (point)))
     (save-excursion
       (let* ((cont-prefix (fancy-fill-paragraph--line-comment-prefix opener-pos))
-             (prefix-col (string-width cont-prefix))
-             (changed nil))
-        (dolist (para
-                 (fancy-fill-paragraph--body-paragraph-bounds
-                  beg end prefix-col (or sel-beg pos) (or sel-end pos)))
-          (when (fancy-fill-paragraph--fill-line-comment-body (car para) (cdr para) cont-prefix)
-            (setq changed t)))
-        changed))))
+             (prefix-col (string-width cont-prefix)))
+        (fancy-fill-paragraph--fill-body-paragraphs
+         beg end prefix-col (or sel-beg pos) (or sel-end pos)
+         (lambda (para-beg para-end)
+           (fancy-fill-paragraph--fill-prefixed-region para-beg para-end cont-prefix)))))))
 
 (defun fancy-fill-paragraph--comment-or-string-regions (beg end pos)
   "Return list of (BEG END FILL-FN) for each syntax region in BEG..END.
@@ -685,7 +673,7 @@ Returns nil when no syntax boundaries are found."
         (when syn-start
           (goto-char syn-start)))
       (while (< (point) end)
-        ;; Skip whitespace between regions.
+        ;; Skip blank-space between regions.
         (skip-chars-forward " \t\n" end)
         (when (< (point) end)
           (let ((region-line-beg (pos-bol))
@@ -702,7 +690,7 @@ Returns nil when no syntax boundaries are found."
                        #'fancy-fill-paragraph--fill-block-comment-region
                        opener-pos)
                       regions))
-               ;; Line comment — find the full block and skip past it.
+               ;; Line comment - find the full block and skip past it.
                (t
                 (let ((bounds (fancy-fill-paragraph--line-comment-bounds opener-pos beg end)))
                   (push (list
@@ -718,7 +706,10 @@ Returns nil when no syntax boundaries are found."
                   (progn
                     (forward-sexp 1)
                     (push (list
-                           region-line-beg (pos-eol) #'fancy-fill-paragraph--fill-string-region)
+                           region-line-beg
+                           (pos-eol)
+                           #'fancy-fill-paragraph--fill-string-region
+                           opener-pos)
                           regions))
                 (scan-error
                  (goto-char end))))
@@ -829,32 +820,162 @@ can fill later paragraphs first without invalidating earlier positions."
           (setq para-end nil)))
       result)))
 
+(defun fancy-fill-paragraph--fill-prefixed-paragraph
+    (lines replace-beg replace-end cont-prefix &optional first-prefix)
+  "Fill LINES with CONT-PREFIX and replace REPLACE-BEG..REPLACE-END.
+FIRST-PREFIX, when non-nil, is used on the first output line instead
+of CONT-PREFIX (e.g. for a comment opener like \"/* \").
+Returns non-nil when the buffer was modified."
+  (declare (important-return-value t))
+  (let* ((prefix-col (string-width cont-prefix))
+         (result
+          (fancy-fill-paragraph--fill-and-reprefix
+           lines (max 1 (- fill-column prefix-col)) cont-prefix
+           first-prefix)))
+    (when result
+      (fancy-fill-paragraph--replace-region replace-beg replace-end result))))
+
+(defun fancy-fill-paragraph--fill-syntax-region (beg end inner-body multiline-fn inline-fn)
+  "Dispatch filling of a syntax region based on its structure.
+BEG and END are the full region bounds.  INNER-BODY is the raw body
+bounds from `--comment-or-string-body-bounds', or nil.
+When INNER-BODY is non-nil, call MULTILINE-FN with no arguments.
+When the region is empty (delimiter-only), return nil.
+Otherwise call INLINE-FN with no arguments."
+  (declare (important-return-value t))
+  (cond
+   (inner-body
+    (funcall multiline-fn))
+   ((fancy-fill-paragraph--empty-syntax-region-p beg end)
+    nil)
+   (t
+    (funcall inline-fn))))
+
+(defun fancy-fill-paragraph--fill-body-paragraphs
+    (body-beg body-end prefix-col sel-beg sel-end para-fill-fn)
+  "Fill paragraphs in BODY-BEG..BODY-END, calling PARA-FILL-FN for each.
+PREFIX-COL is the prefix width for paragraph-boundary detection.
+SEL-BEG and SEL-END restrict filling to overlapping paragraphs.
+PARA-FILL-FN is called as (PARA-FILL-FN PARA-BEG PARA-END) and should
+return non-nil when the buffer was modified.
+Returns non-nil when any paragraph changed."
+  (declare (important-return-value t))
+  (let ((changed nil))
+    (dolist (para
+             (fancy-fill-paragraph--body-paragraph-bounds
+              body-beg body-end prefix-col sel-beg sel-end))
+      (when (funcall para-fill-fn (car para) (cdr para))
+        (setq changed t)))
+    changed))
+
+(defun fancy-fill-paragraph--fill-prefixed-region
+    (beg end cont-prefix &optional first-prefix first-line-text replace-beg)
+  "Strip lines from BEG..END, fill with CONT-PREFIX, and replace the region.
+Lines are stripped of CONT-PREFIX width columns.  When FIRST-LINE-TEXT
+is non-nil it is prepended as the first line (e.g. opener-line body text).
+FIRST-PREFIX, when non-nil, is used on the first output line.
+REPLACE-BEG, when non-nil, overrides BEG as the replacement start
+\(e.g. to include the opener line in the replaced span).
+Returns non-nil when the buffer was modified."
+  (declare (important-return-value t))
+  (let* ((prefix-col (string-width cont-prefix))
+         (lines
+          (fancy-fill-paragraph--strip-region-lines beg (min (1+ end) (point-max)) prefix-col))
+         (lines
+          (cond
+           (first-line-text
+            (cons first-line-text lines))
+           (t
+            lines))))
+    (fancy-fill-paragraph--fill-prefixed-paragraph lines (or replace-beg beg) end cont-prefix
+                                                   first-prefix)))
+
+(defun fancy-fill-paragraph--string-continuation-prefix (inner-body)
+  "Return the continuation prefix for a multi-line string with opener text.
+INNER-BODY is the raw body bounds (first line after opener to last line
+before closer).  Returns the indentation of the first body line as a
+blank-space string."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char (car inner-body))
+    (skip-chars-forward " \t" (pos-eol))
+    (buffer-substring-no-properties (pos-bol) (point))))
+
+(defun fancy-fill-paragraph--fill-multiline-syntax-body
+    (beg inner-body cont-prefix opener-prefix opener-text para-fill-fn sel-beg sel-end)
+  "Fill paragraphs in a multi-line syntax region, merging opener text.
+BEG is `pos-bol' of the opener line.  INNER-BODY is (BODY-BEG . BODY-END)
+for the lines between opener and closer.  CONT-PREFIX is the continuation
+prefix for body lines.  OPENER-PREFIX is the first-line prefix when the
+opener carries text (e.g. \"/* \"), or nil.  OPENER-TEXT is the body text
+on the opener line (e.g. \"Only flush\"), or nil.
+PARA-FILL-FN is called as (PARA-FILL-FN PARA-BEG PARA-END) for each
+non-opener paragraph.  SEL-BEG and SEL-END restrict filling to
+overlapping paragraphs (callers should default to point when not
+region-restricted).
+Returns non-nil when the buffer was modified."
+  (declare (important-return-value t))
+  (let* ((prefix-col (string-width cont-prefix))
+         ;; Widen body to include the opener line when it carries text,
+         ;; so paragraph detection sees it as part of the first paragraph.
+         (scan-body
+          (cond
+           (opener-text
+            (cons beg (cdr inner-body)))
+           (t
+            inner-body))))
+    (fancy-fill-paragraph--fill-body-paragraphs
+     (car scan-body) (cdr scan-body) prefix-col sel-beg sel-end
+     (lambda (para-beg para-end)
+       (cond
+        ;; First paragraph includes the opener line: merge opener
+        ;; text with body lines using the opener prefix for line 1.
+        ((and opener-text (= para-beg beg))
+         (fancy-fill-paragraph--fill-prefixed-region (car inner-body) para-end cont-prefix
+                                                     opener-prefix
+                                                     opener-text
+                                                     beg))
+        (t
+         (funcall para-fill-fn para-beg para-end)))))))
+
 (defun fancy-fill-paragraph--fill-block-comment-body (body-beg body-end cont-prefix)
   "Fill a separate-line block comment body from BODY-BEG to BODY-END."
-  (let ((prefix-col (string-width cont-prefix)))
-    (cond
-     ((fancy-fill-paragraph--block-comment-body-prefix-matches-p body-beg body-end cont-prefix)
-      (let ((result
-             (fancy-fill-paragraph--fill-and-reprefix
-              (fancy-fill-paragraph--strip-region-lines
-               body-beg (min (1+ body-end) (point-max)) prefix-col)
-              (max 1 (- fill-column prefix-col)) cont-prefix)))
-        (when result
-          (fancy-fill-paragraph--replace-region body-beg body-end result))))
-     (t
-      ;; Prefix doesn't match body lines (e.g. XML comments),
-      ;; fall back to standard fill.
-      (let ((fill-prefix cont-prefix))
-        (fancy-fill-paragraph--fill-region body-beg body-end))))))
+  (cond
+   ((fancy-fill-paragraph--block-comment-body-prefix-matches-p body-beg body-end cont-prefix)
+    (fancy-fill-paragraph--fill-prefixed-region body-beg body-end cont-prefix))
+   (t
+    ;; Prefix doesn't match body lines (e.g. XML comments),
+    ;; fall back to standard fill.
+    (let ((fill-prefix cont-prefix))
+      (fancy-fill-paragraph--fill-region body-beg body-end)))))
 
-(defun fancy-fill-paragraph--block-comment-opener-column (comment-start-pos)
-  "Return the buffer column immediately after the block comment opener."
+(defun fancy-fill-paragraph--opener-prefix-and-text ()
+  "Return a plist with :prefix and :text for the opener line at point.
+Point should be at the position where body content would begin.
+:prefix is the buffer text from `pos-bol' to point.
+:text is the remaining text on the line, or nil when point is at eol."
+  (declare (important-return-value t))
+  (list
+   :prefix (buffer-substring-no-properties (pos-bol) (point))
+   :text
+   (cond
+    ((eolp)
+     nil)
+    (t
+     (buffer-substring-no-properties (point) (pos-eol))))))
+
+(defun fancy-fill-paragraph--block-comment-opener-info (comment-start-pos)
+  "Return a plist describing the block comment opener at COMMENT-START-POS.
+The plist contains:
+- :content-col  Column where content begins (after delimiter and blank-space).
+- :prefix       The opener prefix string (from `pos-bol' to :content-col).
+- :text         Text after the delimiter on the opener line, or nil."
   (declare (important-return-value t))
   (save-excursion
     (goto-char comment-start-pos)
     (skip-chars-forward "^ \t\n" (pos-eol))
     (skip-chars-forward " \t" (pos-eol))
-    (current-column)))
+    (nconc (list :content-col (current-column)) (fancy-fill-paragraph--opener-prefix-and-text))))
 
 (defun fancy-fill-paragraph--block-comment-inline-closer (beg end prefix-col)
   "Return the verbatim closer line for an inline block comment, or nil."
@@ -891,15 +1012,16 @@ when non-nil, is excluded from the returned content."
           (forward-line 1))
         (nreverse result)))))
 
-(defun fancy-fill-paragraph--fill-block-comment-inline (beg end comment-start-pos cont-prefix)
-  "Fill an inline block comment in BEG..END using CONT-PREFIX."
+(defun fancy-fill-paragraph--fill-block-comment-inline
+    (beg end comment-start-pos cont-prefix opener-col)
+  "Fill an inline block comment in BEG..END using CONT-PREFIX.
+OPENER-COL is the column where content begins after the opener delimiter."
   (unless (eq
            comment-start-pos
            (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss (1- end)))))
     (error "Expected comment at %d" comment-start-pos))
   (let* ((prefix-col
           (max (fancy-fill-paragraph--prefix-column-width beg cont-prefix) (length cont-prefix)))
-         (opener-col (fancy-fill-paragraph--block-comment-opener-column comment-start-pos))
          (opener-text
           (save-excursion
             (goto-char beg)
@@ -941,50 +1063,86 @@ prefix, fills, then restores the opener."
               (progn
                 (goto-char comment-start-pos)
                 (current-column)))
-             (body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
+             (opener-info (fancy-fill-paragraph--block-comment-opener-info comment-start-pos))
+             (inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
              (cont-prefix
               (fancy-fill-paragraph--block-comment-continuation-prefix
-               beg body opener-col comment-start-pos)))
-        (cond
-         (body
-          (let ((prefix-col (string-width cont-prefix))
-                (changed nil))
-            (dolist (para
-                     (fancy-fill-paragraph--body-paragraph-bounds
-                      (car body) (cdr body) prefix-col (or sel-beg pos) (or sel-end pos)))
-              (when (fancy-fill-paragraph--fill-block-comment-body
-                     (car para) (cdr para) cont-prefix)
-                (setq changed t)))
-            changed))
-         ;; Empty comment (e.g. "/*\n */") - nothing to fill.
-         ((fancy-fill-paragraph--empty-syntax-region-p beg end))
-         (t
-          (fancy-fill-paragraph--fill-block-comment-inline
-           beg end comment-start-pos cont-prefix)))))))
+               beg inner-body opener-col comment-start-pos)))
+        (fancy-fill-paragraph--fill-syntax-region
+         beg end inner-body
+         (lambda ()
+           (fancy-fill-paragraph--fill-multiline-syntax-body
+            beg
+            inner-body
+            cont-prefix
+            (plist-get opener-info :prefix)
+            (plist-get opener-info :text)
+            (lambda
+              (para-beg para-end)
+              (fancy-fill-paragraph--fill-block-comment-body para-beg para-end cont-prefix))
+            (or sel-beg pos)
+            (or sel-end pos)))
+         (lambda ()
+           (fancy-fill-paragraph--fill-block-comment-inline
+            beg end comment-start-pos cont-prefix (plist-get opener-info :content-col))))))))
 
-(defun fancy-fill-paragraph--fill-string-region (beg end &optional sel-beg sel-end)
+(defun fancy-fill-paragraph--string-opener-info (opener-pos)
+  "Return a plist describing the string opener at OPENER-POS.
+OPENER-POS is the syntax-derived position where the string sexp begins
+\(e.g. the `r' in `r\"\"\"' or the first quote in `\"\"\"').
+Normal callers provide a valid string opener; the fallback path
+\(no quote found on the line) is a defensive guard only.
+The plist contains:
+- :prefix  Exact buffer text from `pos-bol' to the start of opener-line
+           body content (indentation + any prefix chars + delimiter +
+           trailing space).
+- :text    Opener-line body content after the prefix, or nil when the
+           opener line contains only the delimiter."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char opener-pos)
+    ;; Skip to the first quote character, passing any string prefix
+    ;; letters (e.g. r, f, b, u, rb, fr in r""").
+    (skip-chars-forward "^'\"\n" (pos-eol))
+    (cond
+     ((or (eolp) (eq (char-after) ?\n))
+      ;; Defensive fallback: no quote found on this line.
+      (list :prefix (buffer-substring-no-properties (pos-bol) (pos-eol)) :text nil))
+     (t
+      ;; Skip the quote characters (e.g. \"\"\", ''').
+      (skip-chars-forward (string (char-after)) (pos-eol))
+      (skip-chars-forward " \t" (pos-eol))
+      (fancy-fill-paragraph--opener-prefix-and-text)))))
+
+(defun fancy-fill-paragraph--fill-string-region (beg end opener-pos &optional sel-beg sel-end)
   "Fill a string in the region BEG..END.
+OPENER-POS is the buffer position where the string sexp begins.
 When SEL-BEG and SEL-END are non-nil, fill only body paragraphs
 overlapping that selection.  Otherwise fill the paragraph at point.
 When the delimiters occupy their own lines, fills only the body text
 between them.  When the delimiters share lines with body text (inline
 delimiters), fills the entire region, treating the delimiters as part
 of the text."
-  (let ((body (fancy-fill-paragraph--comment-or-string-body-bounds beg end)))
-    (cond
-     (body
-      (let ((changed nil))
-        (dolist (para
-                 (fancy-fill-paragraph--body-paragraph-bounds
-                  (car body) (cdr body) 0 (or sel-beg (point)) (or sel-end (point))))
-          (when (fancy-fill-paragraph--fill-region (car para) (cdr para))
-            (setq changed t)))
-        changed))
-     ;; Empty string (e.g. """\n""") - nothing to fill.
-     ((fancy-fill-paragraph--empty-syntax-region-p beg end))
-     (t
-      ;; Inline delimiters - fill the entire region.
-      (fancy-fill-paragraph--fill-region beg end)))))
+  (let* ((inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
+         (opener-info
+          (when inner-body
+            (fancy-fill-paragraph--string-opener-info opener-pos)))
+         (cont-prefix
+          (when (and inner-body (plist-get opener-info :text))
+            (fancy-fill-paragraph--string-continuation-prefix inner-body))))
+    (fancy-fill-paragraph--fill-syntax-region
+     beg end inner-body
+     (lambda ()
+       (fancy-fill-paragraph--fill-multiline-syntax-body
+        beg
+        inner-body
+        (or cont-prefix "")
+        (plist-get opener-info :prefix)
+        (plist-get opener-info :text)
+        #'fancy-fill-paragraph--fill-region
+        (or sel-beg (point))
+        (or sel-end (point))))
+     (lambda () (fancy-fill-paragraph--fill-region beg end)))))
 
 (defun fancy-fill-paragraph--replace-region (beg end result)
   "Replace the region BEG..END with RESULT when it differs.
@@ -1334,7 +1492,7 @@ INDENT-WIDTH is the number of leading blank-space characters."
       (let ((entry (car entries-remaining)))
         (cond
          ((eq (plist-get entry :line-type) 'literal)
-          ;; Literal: check leading whitespace then prefix.
+          ;; Literal: check leading blank-space then prefix.
           (let* ((prefix (plist-get entry :line-value))
                  (indent (fancy-fill-paragraph--leading-indent line)))
             (when (eq t (compare-strings prefix 0 nil line indent (+ indent (length prefix))))
@@ -1515,7 +1673,7 @@ for recursive dot-point detection."
 (defun fancy-fill-paragraph--fill-lines-indent-split (lines local-fill-column dp-list)
   "Fill LINES, splitting into sub-paragraphs at indentation changes.
 LOCAL-FILL-COLUMN is the target line width.
-Groups consecutive lines with the same leading whitespace and fills
+Groups consecutive lines with the same leading blank-space and fills
 each group independently via `fancy-fill-paragraph--fill-lines'.
 Falls through to plain fill when all lines share the same indentation.
 DP-LIST is passed through for dot-point detection in recursive calls."
@@ -1659,7 +1817,9 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
                 (fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after (point))))
               (forward-sexp 1)
               (setq changed
-                    (fancy-fill-paragraph--fill-string-region region-beg (pos-eol) beg end))))))
+                    (fancy-fill-paragraph--fill-string-region region-beg (pos-eol) syn-start
+                                                              beg
+                                                              end))))))
          ;; Selection spans multiple line comments at the same indent:
          ;; beg-syn and end-syn differ but both are line comments.
          ((and fancy-fill-paragraph-syntax-bounds
