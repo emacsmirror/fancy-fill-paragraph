@@ -619,13 +619,17 @@ starts at the same column as OPENER-POS are included."
         (setq block-end (pos-eol)))
       (cons block-beg block-end))))
 
-(defun fancy-fill-paragraph--line-comment-prefix (opener-pos)
-  "Return the continuation prefix for the line comment at OPENER-POS.
+(defun fancy-fill-paragraph--line-comment-prefix (pos)
+  "Return the continuation prefix for the line comment containing POS.
+POS may be at the line beginning, anywhere in the leading blank-space,
+or at the comment-start delimiter itself.
 The prefix includes leading indentation, comment delimiter characters,
 and one trailing space when present."
   (declare (important-return-value t))
   (save-excursion
-    (goto-char opener-pos)
+    (goto-char pos)
+    ;; Skip leading blank-space (no-op when POS is at the delimiter).
+    (skip-chars-forward " \t" (pos-eol))
     ;; Skip comment delimiter characters (e.g. \"#\", \";;\").
     ;; Syntax class `<' (comment-start) matches only the delimiter,
     ;; unlike a character-class skip which would consume content too.
@@ -634,15 +638,16 @@ and one trailing space when present."
     (skip-chars-forward " \t" (pos-eol))
     (buffer-substring-no-properties (pos-bol) (point))))
 
-(defun fancy-fill-paragraph--fill-line-comment-region
-    (beg end opener-pos &optional sel-beg sel-end)
+(defun fancy-fill-paragraph--fill-line-comment-region (beg end &optional sel-beg sel-end)
   "Fill a line-comment block in the region BEG..END.
-OPENER-POS is the buffer position of a comment character in the block.
+The continuation prefix is derived from the first line of the block so
+that a cursor on a continuation line (e.g. with deeper post-`#' indent)
+still produces the canonical prefix shared by the block.
 When SEL-BEG and SEL-END are non-nil, fill only paragraphs
 overlapping that selection.  Otherwise fill the paragraph at point."
   (let ((pos (point)))
     (save-excursion
-      (let* ((cont-prefix (fancy-fill-paragraph--line-comment-prefix opener-pos))
+      (let* ((cont-prefix (fancy-fill-paragraph--line-comment-prefix beg))
              (prefix-col (string-width cont-prefix)))
         (fancy-fill-paragraph--fill-body-paragraphs
          beg end prefix-col (or sel-beg pos) (or sel-end pos)
@@ -698,8 +703,7 @@ Returns nil when no syntax boundaries are found."
                   (push (list
                          (car bounds)
                          (cdr bounds)
-                         #'fancy-fill-paragraph--fill-line-comment-region
-                         opener-pos)
+                         #'fancy-fill-paragraph--fill-line-comment-region)
                         regions)
                   (goto-char (1+ (cdr bounds)))))))
              ;; Not a comment; check for a string delimiter.
@@ -1810,9 +1814,9 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
                      (fancy-fill-paragraph--line-comment-bounds
                       syn-start (point-min) (point-max))))
                 (setq changed
-                      (fancy-fill-paragraph--fill-line-comment-region
-                       (car bounds) (cdr bounds) syn-start
-                       beg end))))
+                      (fancy-fill-paragraph--fill-line-comment-region (car bounds) (cdr bounds)
+                                                                      beg
+                                                                      end))))
              ;; String: advance past closer via forward-sexp.
              ((progn
                 (goto-char syn-start)
@@ -1834,7 +1838,7 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
           (let ((bounds
                  (fancy-fill-paragraph--line-comment-bounds beg-syn (point-min) (point-max))))
             (setq changed
-                  (fancy-fill-paragraph--fill-line-comment-region (car bounds) (cdr bounds) beg-syn
+                  (fancy-fill-paragraph--fill-line-comment-region (car bounds) (cdr bounds)
                                                                   beg
                                                                   end))))
          (t
