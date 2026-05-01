@@ -468,8 +468,10 @@ the first entry in the table takes priority.")
 (defun fancy-fill-paragraph--split-weights-docstring ()
   "Return the full docstring for `fancy-fill-paragraph-split-weights'."
   (declare (important-return-value t))
+  ;; Use `documentation-property' rather than `get' so the byte-compiler's
+  ;; lazy (file . offset) docstring reference is resolved to a real string.
   (concat
-   (get 'fancy-fill-paragraph-split-weights 'variable-documentation)
+   (documentation-property 'fancy-fill-paragraph-split-weights 'variable-documentation t)
    "\n\nAvailable keys (with default weights):\n\n"
    (let ((entries nil))
      (dolist (entry fancy-fill-paragraph--delimiter-table)
