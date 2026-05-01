@@ -3747,6 +3747,79 @@
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-comment-dot-point-cursor-last-continuation ()
+  "Cursor at end of a continuation line should derive the prefix from the block, not the cursor line.
+The continuation lines have `#   ' (deeper post-`#' indent) than the
+dot-point lines `# * '.  Filling must use `# ' as the cont-prefix
+regardless of which line the cursor is on."
+  (let ((fill-column 80)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat
+          "    # Assumptions:\n"
+          "    # * We don't return the absolute path name of the directory content, just\n"
+          "    #   the name relative to `path`\n"
+          "    # * We can return directory contents in any order;"
+          " we choose to sort directory contents\n"
+          "    #   to make the tests deterministic\n"
+          "    def ls(self): pass\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat
+          "    # Assumptions:\n"
+          "    # * We don't return the absolute path name of the directory content,\n"
+          "    #   just the name relative to `path`\n"
+          "    # * We can return directory contents in any order;\n"
+          "    #   we choose to sort directory contents to make the tests deterministic\n"
+          "    def ls(self): pass\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (forward-line 4)
+        (end-of-line)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comment-dot-point-cursor-middle-continuation ()
+  "Cursor at end of an inner continuation line should derive the prefix from the block."
+  (let ((fill-column 80)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat
+          "    # Assumptions:\n"
+          "    # * We don't return the absolute path name of the directory content, just\n"
+          "    #   the name relative to `path`\n"
+          "    # * We can return directory contents in any order;"
+          " we choose to sort directory contents\n"
+          "    #   to make the tests deterministic\n"
+          "    def ls(self): pass\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat
+          "    # Assumptions:\n"
+          "    # * We don't return the absolute path name of the directory content,\n"
+          "    #   just the name relative to `path`\n"
+          "    # * We can return directory contents in any order;\n"
+          "    #   we choose to sort directory contents to make the tests deterministic\n"
+          "    def ls(self): pass\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (forward-line 2)
+        (end-of-line)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-python-r-string-opener-text-region-second-paragraph ()
   "Active region in second paragraph of r-string should not refill opener paragraph."
   (let ((fill-column 50)
