@@ -9,6 +9,7 @@ all: test
 
 test:
 	./tests/fancy-fill-paragraph-tests.sh
+	./tests/fancy-fill-bytecompile-load.sh
 
 doc:
 	python3 ./_misc/readme_update.py
