@@ -2782,6 +2782,110 @@ shorter delimiter run deletes content characters (here the first
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-comments-uneven-gap-no-deletion ()
+  "A narrower delimiter-to-content gap on a later line must lose no text.
+The continuation prefix derives from the first line; stripping its
+width from a line with a narrower gap used to delete content."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "#  aaa bbb\n# ccc ddd\n")
+        (text-expected "#  aaa bbb\n# ccc ddd\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 5)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-uneven-gap-no-deletion ()
+  "A narrower gap after \"//\" on a later line must lose no text."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "//  aaa bbb\n// ccc ddd\n")
+        (text-expected "//  aaa bbb\n// ccc ddd\n"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 5)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comments-tab-gap-unwrap ()
+  "A tab after the delimiter must not distort the stripped width.
+`string-width' counts a tab as `tab-width' columns regardless of its
+start column; the strip width must come from buffer columns.  The
+mixed-gap lines join and all content characters survive."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "#\taaa bbb\n# ccc ddd\n")
+        (text-expected "# aaa bbb ccc ddd\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 5)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comments-wide-paragraph-keeps-gap ()
+  "A wide-gap paragraph must keep its prefix beside a narrow one.
+The continuation prefix is derived per paragraph; a narrower
+delimiter-to-content gap in another paragraph of the same block must
+not re-indent this one."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "#   wide aaa\n#   bbb ccc\n#\n# narrow ggg\n")
+        (text-expected "#   wide aaa bbb ccc\n#\n# narrow ggg\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 5)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comments-wide-paragraph-keeps-gap-wrap ()
+  "A wide-gap paragraph must keep its prefix on wrapped lines.
+Same preservation as the join case: wrapping must carry the
+paragraph's own \"#   \" prefix onto continuation lines, not the
+block-minimum prefix from the narrow sibling paragraph."
+  (let ((fill-column 16)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "#   wide aaa bbb ccc ddd eee fff\n#\n# narrow ggg\n")
+        (text-expected
+         (concat "#   wide aaa bbb\n" "#   ccc ddd eee\n" "#   fff\n" "#\n" "# narrow ggg\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 5)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comments-narrow-paragraph-beside-wide ()
+  "Filling the narrow paragraph must not disturb the wide sibling.
+The narrow paragraph joins with its own \"# \" prefix; the wide
+paragraph's lines and gap are untouched."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "#   wide aaa bbb\n#\n# narrow ggg hhh\n# iii jjj\n")
+        (text-expected "#   wide aaa bbb\n#\n# narrow ggg hhh iii jjj\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 25)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-python-comments-tab-aligned-unwrap ()
   "Tab and space indented comments at the same visual column should join."
   (let ((fill-column 70)

@@ -727,40 +727,76 @@ are included."
         (setq block-end (pos-eol)))
       (cons block-beg block-end))))
 
-(defun fancy-fill-paragraph--line-comment-prefix (pos)
-  "Return the continuation prefix for the line comment containing POS.
-POS may be at the line beginning, anywhere in the leading blank-space,
+(defun fancy-fill-paragraph--line-comment-prefix (beg end)
+  "Return (PREFIX . PREFIX-COL) for the line comment block BEG..END.
+BEG may be at the line beginning, anywhere in the leading blank-space,
 or at the comment-start delimiter itself.
-The prefix includes leading indentation, comment delimiter characters,
-and one trailing space when present."
+PREFIX holds the first line's indentation and delimiter run followed
+by blank-space whose width is the narrowest delimiter-to-content gap
+of any block line, so that stripping PREFIX-COL columns never removes
+content characters.  Delimiter-only lines do not constrain the gap;
+stripping clamps at their end-of-line.
+PREFIX-COL is the buffer column at which PREFIX ends.  It is derived
+from buffer columns rather than `string-width', which misreports tabs
+whose width depends on the column they start at."
   (declare (important-return-value t))
   (save-excursion
-    (goto-char pos)
-    ;; Skip leading blank-space (no-op when POS is at the delimiter).
+    (goto-char beg)
+    ;; Skip leading blank-space (no-op when BEG is at the delimiter).
     (skip-chars-forward " \t" (pos-eol))
-    ;; Skip comment delimiter characters (e.g. \"#\", \";;\", \"//\").
-    (let ((delim-end (fancy-fill-paragraph--line-comment-delimiter-end (point))))
-      (when delim-end
-        (goto-char delim-end)))
-    ;; Include trailing blank-space after the delimiter.
-    (skip-chars-forward " \t" (pos-eol))
-    (buffer-substring-no-properties (pos-bol) (point))))
+    (let* ((delim-end (or (fancy-fill-paragraph--line-comment-delimiter-end (point)) (point)))
+           (head (buffer-substring-no-properties (pos-bol) delim-end))
+           (run-end-col
+            (progn
+              (goto-char delim-end)
+              (current-column)))
+           (gap nil))
+      ;; Find the narrowest delimiter-to-content gap across the block.
+      ;; Block lines share the delimiter run and its column.
+      (goto-char beg)
+      (forward-line 0)
+      (while (< (point) end)
+        (move-to-column run-end-col)
+        (skip-chars-forward " \t" (pos-eol))
+        (cond
+         ;; Delimiter-only line: no content to protect.
+         ((eolp)
+          nil)
+         (t
+          (let ((line-gap (- (current-column) run-end-col)))
+            (cond
+             ((or (null gap) (< line-gap gap))
+              (setq gap line-gap))))))
+        (cond
+         ((zerop (forward-line 1))
+          nil)
+         (t
+          (goto-char (point-max)))))
+      (let ((gap (or gap 0)))
+        (cons (concat head (make-string gap ?\s)) (+ run-end-col gap))))))
 
 (defun fancy-fill-paragraph--fill-line-comment-region (beg end &optional sel-beg sel-end)
   "Fill a line-comment block in the region BEG..END.
-The continuation prefix is derived from the first line of the block so
-that a cursor on a continuation line (e.g. with deeper post-`#' indent)
-still produces the canonical prefix shared by the block.
+Paragraph boundaries are detected with the block-wide prefix column,
+then the continuation prefix is derived per paragraph: a cursor on a
+continuation line (e.g. with deeper post-`#' indent) still produces
+the canonical prefix shared by the paragraph, and a paragraph whose
+delimiter-to-content gap is wider than another paragraph's keeps its
+own prefix instead of being re-indented to the block minimum.
 When SEL-BEG and SEL-END are non-nil, fill only paragraphs
 overlapping that selection.  Otherwise fill the paragraph at point."
   (let ((pos (point)))
     (save-excursion
-      (let* ((cont-prefix (fancy-fill-paragraph--line-comment-prefix beg))
-             (prefix-col (string-width cont-prefix)))
+      (let ((prefix-col (cdr (fancy-fill-paragraph--line-comment-prefix beg end))))
         (fancy-fill-paragraph--fill-body-paragraphs
          beg end prefix-col (or sel-beg pos) (or sel-end pos)
          (lambda (para-beg para-end)
-           (fancy-fill-paragraph--fill-prefixed-region para-beg para-end cont-prefix)))))))
+           (let ((prefix-and-col (fancy-fill-paragraph--line-comment-prefix para-beg para-end)))
+             (fancy-fill-paragraph--fill-prefixed-region para-beg para-end (car prefix-and-col)
+                                                         nil
+                                                         nil
+                                                         nil
+                                                         (cdr prefix-and-col)))))))))
 
 (defun fancy-fill-paragraph--comment-or-string-regions (beg end pos)
   "Return list of (BEG END FILL-FN) for each syntax region in BEG..END.
@@ -983,16 +1019,19 @@ Returns non-nil when any paragraph changed."
     changed))
 
 (defun fancy-fill-paragraph--fill-prefixed-region
-    (beg end cont-prefix &optional first-prefix first-line-text replace-beg)
+    (beg end cont-prefix &optional first-prefix first-line-text replace-beg prefix-col)
   "Strip lines from BEG..END, fill with CONT-PREFIX, and replace the region.
 Lines are stripped of CONT-PREFIX width columns.  When FIRST-LINE-TEXT
 is non-nil it is prepended as the first line (e.g. opener-line body text).
 FIRST-PREFIX, when non-nil, is used on the first output line.
 REPLACE-BEG, when non-nil, overrides BEG as the replacement start
 \(e.g. to include the opener line in the replaced span).
+PREFIX-COL, when non-nil, is the column count to strip, overriding
+the `string-width' of CONT-PREFIX (which misreports tabs whose width
+depends on the column they start at).
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
-  (let* ((prefix-col (string-width cont-prefix))
+  (let* ((prefix-col (or prefix-col (string-width cont-prefix)))
          (lines
           (fancy-fill-paragraph--strip-region-lines beg (min (1+ end) (point-max)) prefix-col))
          (lines
