@@ -2701,6 +2701,54 @@ not match the style c newline ender, so it is a block comment."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-comments-exclude-tab-misaligned ()
+  "A tab-indented comment at a different visual column must not join.
+`move-to-column' overshoots when the target column falls inside a
+tab; the comment found at the overshot column belongs to another
+block."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "    # aaa bbb\n\t# ccc ddd\n")
+        (text-expected "    # aaa bbb\n\t# ccc ddd\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 7)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-exclude-tab-misaligned ()
+  "A tab-indented \"//\" comment at a different visual column must not join."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "    // aaa bbb\n\t// ccc ddd\n")
+        (text-expected "    // aaa bbb\n\t// ccc ddd\n"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 8)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-comments-tab-aligned-unwrap ()
+  "Tab and space indented comments at the same visual column should join."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "\t# aaa bbb\n        # ccc ddd\n")
+        (text-expected "\t# aaa bbb ccc ddd\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-style-c-first-char-line-comments-unwrap ()
   "Comment style c carried only on the first opener character is honored.
 Emacs takes style b from the style-determining character alone but
