@@ -657,8 +657,11 @@ are excluded even when unterminated."
   "Return non-nil when the current line has a line comment at INDENT-COL."
   (declare (important-return-value t))
   (save-excursion
-    (move-to-column indent-col)
-    (fancy-fill-paragraph--line-comment-opener-at-point-p)))
+    ;; `move-to-column' may overshoot when INDENT-COL falls inside a
+    ;; tab or the line is short; a comment at the resulting column is
+    ;; at a different indentation and must not join the block.
+    (and (= (move-to-column indent-col) indent-col)
+         (fancy-fill-paragraph--line-comment-opener-at-point-p))))
 
 (defun fancy-fill-paragraph--line-comment-bounds (opener-pos beg end)
   "Return (BLOCK-BEG . BLOCK-END) for consecutive line comments around OPENER-POS.
