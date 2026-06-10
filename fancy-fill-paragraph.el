@@ -296,6 +296,42 @@ SYN-DESCRIPTOR may be nil, in which case nil is returned."
        (or (= (syntax-class syn-descriptor) 12)
            (not (zerop (logand (car syn-descriptor) (ash 1 19)))))))
 
+(defsubst fancy-fill-paragraph--syntax-comment-start-2char-p (syn-first syn-next)
+  "Return non-nil if SYN-FIRST and SYN-NEXT open a two-character comment.
+Either may be nil, in which case nil is returned."
+  (declare (important-return-value t))
+  (and syn-first
+       syn-next
+       ;; Bit 16: first character of a two-character comment starter
+       ;; (e.g. / in //).
+       (not (zerop (logand (car syn-first) (ash 1 16))))
+       ;; Bit 17: second character of a two-character comment starter.
+       (not (zerop (logand (car syn-next) (ash 1 17))))))
+
+(defsubst fancy-fill-paragraph--syntax-comment-style (syn-main &optional syn-other)
+  "Return the comment style bits for a comment delimiter.
+SYN-MAIN is the syntax of the style-determining character: the only
+character of a one-character delimiter, the second character of a
+two-character starter or the first of a two-character ender.
+SYN-OTHER is the syntax of the remaining character of a two-character
+sequence, when present.  Style b (bit 21) is carried only by SYN-MAIN
+while style c (bit 23) is carried by either character, matching
+SYNTAX_FLAGS_COMMENT_STYLE in the Emacs sources.  Style a sets
+neither bit.  SYN-MAIN may be nil, in which case nil is returned."
+  (declare (important-return-value t))
+  (and syn-main
+       (logior
+        (logand (car syn-main) (ash 1 21))
+        (logand
+         (logior
+          (car syn-main)
+          (cond
+           (syn-other
+            (car syn-other))
+           (t
+            0)))
+         (ash 1 23)))))
+
 
 (defun fancy-fill-paragraph--delimiter-join-function (join)
   "Return the join function for JOIN."
@@ -586,14 +622,43 @@ not block comments."
     (goto-char comment-pos)
     (current-column)))
 
+(defun fancy-fill-paragraph--line-comment-opener-at-point-p ()
+  "Return non-nil when point is at a line comment opener.
+Match single-character openers by syntax class and two-character
+openers by syntax flags, then require a comment style that a newline
+terminates (see `fancy-fill-paragraph--syntax-comment-style' for how
+the style is derived).  The style of a block comment opener such as
+/* never matches the newline comment-ender style, so block openers
+are excluded even when unterminated."
+  (declare (important-return-value t))
+  (let* ((syn (syntax-after (point)))
+         (style
+          (and syn
+               (cond
+                ;; Class 11 = comment-start.
+                ((= (syntax-class syn) 11)
+                 (fancy-fill-paragraph--syntax-comment-style syn))
+                ((fancy-fill-paragraph--syntax-comment-start-2char-p
+                  syn (syntax-after (1+ (point))))
+                 (fancy-fill-paragraph--syntax-comment-style (syntax-after (1+ (point))) syn))
+                (t
+                 nil)))))
+    (and style
+         ;; Prefer the syntax of the line's own newline so character
+         ;; and text property syntax both apply; fall back to the
+         ;; syntax table when the buffer ends without one.
+         (let ((nl-syn (or (syntax-after (pos-eol)) (aref (syntax-table) ?\n))))
+           (and nl-syn
+                ;; Class 12: comment-end.
+                (= (syntax-class nl-syn) 12)
+                (= (fancy-fill-paragraph--syntax-comment-style nl-syn) style))))))
+
 (defun fancy-fill-paragraph--line-comment-at-col-p (indent-col)
   "Return non-nil when the current line has a line comment at INDENT-COL."
   (declare (important-return-value t))
   (save-excursion
     (move-to-column indent-col)
-    (let ((syn (syntax-after (point))))
-      ;; Class 11 = comment-start.
-      (and syn (= (syntax-class syn) 11)))))
+    (fancy-fill-paragraph--line-comment-opener-at-point-p)))
 
 (defun fancy-fill-paragraph--line-comment-bounds (opener-pos beg end)
   "Return (BLOCK-BEG . BLOCK-END) for consecutive line comments around OPENER-POS.
@@ -633,7 +698,20 @@ and one trailing space when present."
     ;; Skip comment delimiter characters (e.g. \"#\", \";;\").
     ;; Syntax class `<' (comment-start) matches only the delimiter,
     ;; unlike a character-class skip which would consume content too.
-    (skip-syntax-forward "<")
+    (cond
+     ((not (zerop (skip-syntax-forward "<"))))
+     ;; Two-character openers are punctuation class carrying comment
+     ;; flags instead of class `<'.
+     ((fancy-fill-paragraph--syntax-comment-start-2char-p
+       (syntax-after (point)) (syntax-after (1+ (point))))
+      (forward-char 2)
+      ;; Consume any further starter-flagged characters so that
+      ;; doc-comment leaders keep their full delimiter run, as the
+      ;; class `<' skip above does for repeated single-character
+      ;; delimiters.
+      (while (let ((syn (syntax-after (point))))
+               (and syn (not (zerop (logand (car syn) (logior (ash 1 16) (ash 1 17)))))))
+        (forward-char 1))))
     ;; Include trailing blank-space after the delimiter.
     (skip-chars-forward " \t" (pos-eol))
     (buffer-substring-no-properties (pos-bol) (point))))

@@ -2564,6 +2564,164 @@
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-c-line-comments-wrap ()
+  "A long C++ \"//\" comment should wrap keeping the comment leader."
+  (let ((fill-column 20)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "  // aaa bbb ccc ddd eee fff ggg hhh\n")
+        (text-expected (concat "  // aaa bbb ccc ddd\n" "  // eee fff ggg hhh\n")))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 6)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-unwrap ()
+  "Two short C++ \"//\" comment lines should join within fill-column."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "// aaa bbb\n// ccc ddd\n")
+        (text-expected "// aaa bbb ccc ddd\n"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-exclude-block-comment ()
+  "A block comment line must not be absorbed into an adjacent \"//\" block."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "// aaa bbb\n/* block */\n")
+        (text-expected "// aaa bbb\n/* block */\n"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-exclude-unclosed-block-at-eob ()
+  "An unclosed block comment on the last line must not join a \"//\" block."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "// aaa\n/* bbb")
+        (text-expected "// aaa\n/* bbb"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-unwrap-no-trailing-newline ()
+  "C++ \"//\" lines should join when the buffer lacks a trailing newline."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "// aaa bbb\n// ccc ddd")
+        (text-expected "// aaa bbb ccc ddd"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-doc-leader-wrap ()
+  "A doc-comment \"///\" line should wrap keeping the full delimiter run."
+  (let ((fill-column 20)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "  /// aaa bbb ccc ddd eee fff ggg hhh\n")
+        (text-expected (concat "  /// aaa bbb ccc\n" "  /// ddd eee fff\n" "  /// ggg hhh\n")))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 6)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-sql-line-comments-unwrap ()
+  "Two short SQL \"--\" comment lines should join within fill-column."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "-- aaa bbb\n-- ccc ddd\n")
+        (text-expected "-- aaa bbb ccc ddd\n"))
+    (with-temp-buffer
+      (sql-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-pascal-line-comments-unwrap ()
+  "Pascal \"//\" lines (comment style c) should join within fill-column."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "// aaa bbb\n// ccc ddd\n")
+        (text-expected "// aaa bbb ccc ddd\n"))
+    (with-temp-buffer
+      (pascal-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-pascal-line-comments-exclude-block-comment ()
+  "A Pascal \"{ }\" comment line must not be absorbed into a \"//\" block.
+The \"{\" opener is comment-start class (11), but its style a does
+not match the style c newline ender, so it is a block comment."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "// aaa bbb\n{ block }\n")
+        (text-expected "// aaa bbb\n{ block }\n"))
+    (with-temp-buffer
+      (pascal-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-style-c-first-char-line-comments-unwrap ()
+  "Comment style c carried only on the first opener character is honored.
+Emacs takes style b from the style-determining character alone but
+style c from either character of a two-character opener."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "$% aaa bbb\n$% ccc ddd\n")
+        (text-expected "$% aaa bbb ccc ddd\n"))
+    (with-temp-buffer
+      (let ((tbl (make-syntax-table)))
+        (modify-syntax-entry ?$ ". 1c" tbl)
+        (modify-syntax-entry ?% ". 2" tbl)
+        (modify-syntax-entry ?\n "> c" tbl)
+        (set-syntax-table tbl))
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-c-mode-comments-wrap ()
   "C-mode inline block comments should wrap using `comment-continue'."
   (let ((fill-column 40)
