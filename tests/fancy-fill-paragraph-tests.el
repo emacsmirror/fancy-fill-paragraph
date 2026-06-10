@@ -2734,6 +2734,54 @@ block."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-elisp-comments-exclude-mismatched-run ()
+  "A \";;\" line must not be absorbed into a \";;;\" block.
+The continuation prefix is stripped by column, so absorbing a
+shorter delimiter run deletes content characters (here the first
+\"c\" of \"ccc\")."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial ";;; aaa bbb\n;; ccc ddd\n")
+        (text-expected ";;; aaa bbb\n;; ccc ddd\n"))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 5)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-exclude-mismatched-run ()
+  "A \"///\" line must not be absorbed into a \"//\" block."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "// aaa bbb\n/// ccc ddd\n")
+        (text-expected "// aaa bbb\n/// ccc ddd\n"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 5)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comments-doc-leader-unwrap ()
+  "Two \"///\" lines with equal delimiter runs should still join."
+  (let ((fill-column 70)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial "/// aaa bbb\n/// ccc ddd\n")
+        (text-expected "/// aaa bbb ccc ddd\n"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 5)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-python-comments-tab-aligned-unwrap ()
   "Tab and space indented comments at the same visual column should join."
   (let ((fill-column 70)

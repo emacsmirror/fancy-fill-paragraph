@@ -653,37 +653,77 @@ are excluded even when unterminated."
                 (= (syntax-class nl-syn) 12)
                 (= (fancy-fill-paragraph--syntax-comment-style nl-syn) style))))))
 
-(defun fancy-fill-paragraph--line-comment-at-col-p (indent-col)
-  "Return non-nil when the current line has a line comment at INDENT-COL."
+(defun fancy-fill-paragraph--line-comment-delimiter-end (pos)
+  "Return the end position of the line comment delimiter run at POS.
+POS must be at a line comment opener: a class 11 character or the
+first character of a two-character opener.  The run spans repeated
+delimiter characters so leaders such as \";;;\" or \"///\" stay
+whole.  Return nil when POS is not at a delimiter."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char pos)
+    (cond
+     ;; Syntax class `<' (comment-start) matches only the delimiter,
+     ;; unlike a character-class skip which would consume content too.
+     ((not (zerop (skip-syntax-forward "<")))
+      (point))
+     ;; Two-character openers are punctuation class carrying comment
+     ;; flags instead of class `<'.
+     ((fancy-fill-paragraph--syntax-comment-start-2char-p
+       (syntax-after (point)) (syntax-after (1+ (point))))
+      (forward-char 2)
+      ;; Consume any further starter-flagged characters so that
+      ;; doc-comment leaders keep their full delimiter run, as the
+      ;; class `<' skip above does for repeated single-character
+      ;; delimiters.
+      (while (let ((syn (syntax-after (point))))
+               (and syn (not (zerop (logand (car syn) (logior (ash 1 16) (ash 1 17)))))))
+        (forward-char 1))
+      (point))
+     (t
+      nil))))
+
+(defun fancy-fill-paragraph--line-comment-at-col-p (indent-col delim-str)
+  "Return non-nil when the current line has a line comment at INDENT-COL.
+DELIM-STR is the delimiter run of the block opener; a comment whose
+run differs belongs to another block (\";;\" must not absorb \";;;\"
+nor \"#\" absorb \"##\"), since the continuation prefix is stripped
+by column and would delete or distort a mismatched delimiter."
   (declare (important-return-value t))
   (save-excursion
     ;; `move-to-column' may overshoot when INDENT-COL falls inside a
     ;; tab or the line is short; a comment at the resulting column is
     ;; at a different indentation and must not join the block.
     (and (= (move-to-column indent-col) indent-col)
-         (fancy-fill-paragraph--line-comment-opener-at-point-p))))
+         (fancy-fill-paragraph--line-comment-opener-at-point-p)
+         (let ((delim-end (fancy-fill-paragraph--line-comment-delimiter-end (point))))
+           (and delim-end (equal delim-str (buffer-substring-no-properties (point) delim-end)))))))
 
 (defun fancy-fill-paragraph--line-comment-bounds (opener-pos beg end)
   "Return (BLOCK-BEG . BLOCK-END) for consecutive line comments around OPENER-POS.
 OPENER-POS is the comment-start of the line comment at point.
-BEG and END bound the search.  Only lines whose comment character
-starts at the same column as OPENER-POS are included."
+BEG and END bound the search.  Only lines whose comment delimiter run
+starts at the same column as OPENER-POS and matches its delimiter run
+are included."
   (declare (important-return-value t))
   (save-excursion
     (goto-char opener-pos)
     (let ((indent-col (fancy-fill-paragraph--line-comment-indent-col opener-pos))
+          (delim-str
+           (let ((delim-end (fancy-fill-paragraph--line-comment-delimiter-end opener-pos)))
+             (and delim-end (buffer-substring-no-properties opener-pos delim-end))))
           (block-beg (pos-bol))
           (block-end (pos-eol)))
       ;; Scan backward.
       (while (and (zerop (forward-line -1))
                   (>= (point) beg)
-                  (fancy-fill-paragraph--line-comment-at-col-p indent-col))
+                  (fancy-fill-paragraph--line-comment-at-col-p indent-col delim-str))
         (setq block-beg (pos-bol)))
       ;; Scan forward.
       (goto-char opener-pos)
       (while (and (zerop (forward-line 1))
                   (<= (point) end)
-                  (fancy-fill-paragraph--line-comment-at-col-p indent-col))
+                  (fancy-fill-paragraph--line-comment-at-col-p indent-col delim-str))
         (setq block-end (pos-eol)))
       (cons block-beg block-end))))
 
@@ -698,23 +738,10 @@ and one trailing space when present."
     (goto-char pos)
     ;; Skip leading blank-space (no-op when POS is at the delimiter).
     (skip-chars-forward " \t" (pos-eol))
-    ;; Skip comment delimiter characters (e.g. \"#\", \";;\").
-    ;; Syntax class `<' (comment-start) matches only the delimiter,
-    ;; unlike a character-class skip which would consume content too.
-    (cond
-     ((not (zerop (skip-syntax-forward "<"))))
-     ;; Two-character openers are punctuation class carrying comment
-     ;; flags instead of class `<'.
-     ((fancy-fill-paragraph--syntax-comment-start-2char-p
-       (syntax-after (point)) (syntax-after (1+ (point))))
-      (forward-char 2)
-      ;; Consume any further starter-flagged characters so that
-      ;; doc-comment leaders keep their full delimiter run, as the
-      ;; class `<' skip above does for repeated single-character
-      ;; delimiters.
-      (while (let ((syn (syntax-after (point))))
-               (and syn (not (zerop (logand (car syn) (logior (ash 1 16) (ash 1 17)))))))
-        (forward-char 1))))
+    ;; Skip comment delimiter characters (e.g. \"#\", \";;\", \"//\").
+    (let ((delim-end (fancy-fill-paragraph--line-comment-delimiter-end (point))))
+      (when delim-end
+        (goto-char delim-end)))
     ;; Include trailing blank-space after the delimiter.
     (skip-chars-forward " \t" (pos-eol))
     (buffer-substring-no-properties (pos-bol) (point))))
