@@ -123,6 +123,60 @@
         (fancy-fill-paragraph)
         (should (equal text (buffer-string)))))))
 
+(ert-deftest fill-noop-python-indented-empty-string ()
+  "Indented empty Python triple-quoted string should be unchanged.
+The delimiter-only opener and closer lines must not be merged; that
+would change the string's runtime value."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "x = (\n    \"\"\"\n    \"\"\"\n)\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 14)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-noop-python-indented-blank-string ()
+  "Indented Python triple-quoted string with blank line should be unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "x = (\n    \"\"\"\n\n    \"\"\"\n)\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 14)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-noop-c-mode-indented-empty-comment ()
+  "Indented empty C block comment should be unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "    /*\n     */\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 7)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-noop-c-mode-indented-blank-comment ()
+  "Indented C block comment with only a blank `*' line should be unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "    /*\n     *\n     */\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 7)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
 
 ;; ---------------------------------------------------------------------------
 ;; Split Tests

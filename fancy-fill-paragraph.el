@@ -202,11 +202,16 @@ rather than synthesizing spaces from the column width."
 (defsubst fancy-fill-paragraph--empty-syntax-region-p (beg end)
   "Return non-nil if the syntax region BEG..END has no fillable content.
 True when the delimiters are on separate lines and the opener line
-contains only the delimiter (no text after it)."
+contains only the delimiter (no text after it), with or without
+leading indentation."
   (declare (important-return-value t))
   (and (< beg (fancy-fill-paragraph--last-bol end))
        (save-excursion
          (goto-char beg)
+         ;; Leading indentation first: BEG is a line beginning, so an
+         ;; indented opener otherwise leaves the non-blank skip below
+         ;; consuming nothing and the delimiter misread as content.
+         (skip-chars-forward " \t" (pos-eol))
          (skip-chars-forward "^ \t\n" (pos-eol))
          (skip-chars-forward " \t" (pos-eol))
          (eolp))))
