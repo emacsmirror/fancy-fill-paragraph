@@ -115,31 +115,80 @@ Argument _POS is ignored."
 
 (defun fancy-fill-paragraph--join-string-sentence-end (_pos)
   "Return the join string for sentence-ending punctuation.
-Uses double space when variable
-`sentence-end-double-space' is non-nil.
+Double spacing is applied by `fancy-fill-paragraph--maybe-double-space'.
 Argument _POS is ignored."
   (declare (important-return-value t))
-  (cond
-   (sentence-end-double-space
-    "  ")
-   (t
-    " ")))
+  " ")
 
-(defsubst fancy-fill-paragraph--maybe-double-space (sep text split-pos)
+(defsubst fancy-fill-paragraph--source-space-width (source-space-widths split-pos)
+  "Return original space-run width at SPLIT-POS from SOURCE-SPACE-WIDTHS."
+  (declare (important-return-value t))
+  (cond
+   ((and source-space-widths (< split-pos (length source-space-widths)))
+    (aref source-space-widths split-pos))
+   (t
+    0)))
+
+(defsubst fancy-fill-paragraph--sentence-end-boundary-p (text split-pos)
+  "Return non-nil when TEXT at SPLIT-POS follows sentence punctuation."
+  (declare (important-return-value t))
+  (and (> split-pos 0)
+       (or (memq (aref text (1- split-pos)) '(?. ?? ?! ?\u2026))
+           (and (>= split-pos 2)
+                (not (memq (aref text (1- split-pos)) '(?, ?\; ?:)))
+                (memq (aref text (- split-pos 2)) '(?. ?? ?! ?\u2026))))))
+
+(defsubst fancy-fill-paragraph--maybe-double-space
+    (sep text split-pos &optional source-space-widths)
   "Upgrade SEP to double-space when TEXT at SPLIT-POS follows a sentence end.
 When `sentence-end-double-space' is active and the
 delimiter at SPLIT-POS follows sentence-ending punctuation (e.g. `.\\'',
 `.)'), return double-space.  Exclude continuation punctuation (`,;:')
-where the period is typically an abbreviation (e.g. `etc.,')."
+where the period is typically an abbreviation (e.g. `etc.,').  When
+SOURCE-SPACE-WIDTHS is non-nil, a dotted abbreviation followed by an
+original single space keeps a single space."
   (declare (important-return-value t))
   (cond
    ((and sentence-end-double-space
-         (>= split-pos 2)
-         (not (memq (aref text (1- split-pos)) '(?, ?\; ?:)))
-         (memq (aref text (- split-pos 2)) '(?. ?? ?! ?\u2026)))
+         (fancy-fill-paragraph--sentence-end-boundary-p text split-pos)
+         (not
+          (and (= (fancy-fill-paragraph--source-space-width source-space-widths split-pos) 1)
+               (fancy-fill-paragraph--dotted-abbreviation-boundary-p text split-pos))))
     "  ")
    (t
     sep)))
+
+(defsubst fancy-fill-paragraph--dotted-abbreviation-boundary-p (text split-pos)
+  "Return non-nil when TEXT before SPLIT-POS ends with a dotted abbreviation."
+  (declare (important-return-value t))
+  (and (> split-pos 1)
+       (eq (aref text (1- split-pos)) ?.)
+       (let ((start split-pos))
+         (while (and (> start 0) (not (memq (aref text (1- start)) '(?\s ?\t ?\n))))
+           (setq start (1- start)))
+         (string-match-p
+          "\\`\\(?:[[:alpha:]]\\.\\)\\{2,\\}\\'" (substring text start split-pos)))))
+
+(defun fancy-fill-paragraph--normalize-spaces-with-widths (source)
+  "Return (TEXT . WIDTHS) for SOURCE with space runs collapsed."
+  (declare (important-return-value t))
+  (let ((parts nil)
+        (widths nil)
+        (pos 0)
+        (len (length source)))
+    (while (< pos len)
+      (cond
+       ((eq (aref source pos) ?\s)
+        (let ((start pos))
+          (while (and (< pos len) (eq (aref source pos) ?\s))
+            (setq pos (1+ pos)))
+          (push " " parts)
+          (push (- pos start) widths)))
+       (t
+        (push (char-to-string (aref source pos)) parts)
+        (push 0 widths)
+        (setq pos (1+ pos)))))
+    (cons (apply #'concat (nreverse parts)) (vconcat (nreverse widths)))))
 
 (defsubst fancy-fill-paragraph--delimiter-entry-weight (entry)
   "Return the effective weight for delimiter ENTRY.
@@ -1446,10 +1495,11 @@ If PREFIX does not match every line, fall back to the minimum line indent."
       (nreverse result))))
 
 
-(defun fancy-fill-paragraph--paragraph-to-items (text)
+(defun fancy-fill-paragraph--paragraph-to-items (text &optional source-space-widths)
   "Split TEXT into items at weighted punctuation boundaries.
 Uses `fancy-fill-paragraph--delimiter-table' for delimiter definitions
 and `fancy-fill-paragraph-split-weights' for active delimiters.
+SOURCE-SPACE-WIDTHS maps TEXT positions to original space-run widths.
 Returns a plist with keys:
 - :items - list of strings.
 - :break-weights - vector of break weights per item boundary.
@@ -1509,8 +1559,12 @@ Returns a plist with keys:
                  (delimiter (aref delimiters d-index))
                  (split-pos (cdr boundary))
                  (sep
-                  (fancy-fill-paragraph--maybe-double-space
-                   (funcall (plist-get delimiter :join-string) split-pos) text split-pos)))
+                  (fancy-fill-paragraph--maybe-double-space (funcall (plist-get
+                                                                      delimiter
+                                                                      :join-string)
+                                                                     split-pos)
+                                                            text split-pos
+                                                            source-space-widths)))
             (aset break-weights i (plist-get delimiter :weight))
             (aset seps i sep)
             (aset sep-lens i (string-width sep)))
@@ -1727,12 +1781,13 @@ DOT-POINTS is from `fancy-fill-paragraph--compile-dot-point-patterns'."
 LINES is a list of strings.  Returns a list of result line strings.
 Joins lines, normalizes blank-space, splits at delimiters, and solves."
   (declare (important-return-value t))
-  (let* ((text (mapconcat #'identity lines " "))
-         (text (replace-regexp-in-string "  +" " " text))
-         (text (string-trim text)))
+  (let* ((source-text (string-trim (mapconcat #'identity lines " ")))
+         (normalized (fancy-fill-paragraph--normalize-spaces-with-widths source-text))
+         (text (car normalized))
+         (source-space-widths (cdr normalized)))
     (cond
      ((not (string-empty-p text))
-      (let* ((split-result (fancy-fill-paragraph--paragraph-to-items text))
+      (let* ((split-result (fancy-fill-paragraph--paragraph-to-items text source-space-widths))
              (items (plist-get split-result :items))
              (break-weights (plist-get split-result :break-weights)))
         ;; Penalize breaks that would create false dot-point lines.

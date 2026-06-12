@@ -668,6 +668,39 @@ line (with its code) must be untouched."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-abbreviation-single-space-preserved-with-double-space ()
+  "Single space after an abbreviation period should be preserved."
+  (let ((text-initial "alpha beta e.g. gamma delta epsilon zeta eta theta\n")
+        (text-expected "alpha beta e.g. gamma delta epsilon zeta eta theta\n")
+        (fill-column 60)
+        (sentence-end-double-space t))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char 2)
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
+(ert-deftest fill-abbreviation-line-break-uses-single-space ()
+  "Line breaks after abbreviations refill with a single space."
+  (let ((text-initial "alpha beta e.g.\ngamma delta epsilon zeta eta theta\n")
+        (text-expected "alpha beta e.g. gamma delta epsilon zeta eta theta\n")
+        (fill-column 60)
+        (sentence-end-double-space t))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char 2)
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
+(ert-deftest fill-sentence-double-space-preserved-with-double-space ()
+  "Double space after a sentence period should be preserved."
+  (let ((text-initial "alpha beta.  Gamma delta epsilon zeta eta theta\n")
+        (text-expected "alpha beta.  Gamma delta epsilon zeta eta theta\n")
+        (fill-column 60)
+        (sentence-end-double-space t))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char 2)
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
 (ert-deftest fill-normalizes-double-space ()
   "Existing double spaces are normalized then re-applied based on preference."
   (let ((text-initial "Hello world.  Foo bar.")
@@ -909,6 +942,14 @@ line (with its code) must be untouched."
         (text-expected "She said \"well\u2026\"  He waited.")
         (fancy-fill-paragraph-split-weights
          (list :period 100 :ellipsis 100 :double-quote 25 :open-double-quote 0 :space 1))
+        (sentence-end-double-space t))
+    (should (equal text-expected (test-split-and-solve text-initial 80)))))
+
+(ert-deftest solve-unicode-ellipsis-sentence-end-double-space ()
+  "Unicode ellipsis gets double space when it ends a sentence."
+  (let ((text-initial "She paused\u2026 He waited.")
+        (text-expected "She paused\u2026  He waited.")
+        (fancy-fill-paragraph-split-weights (list :period 100 :ellipsis 100 :space 1))
         (sentence-end-double-space t))
     (should (equal text-expected (test-split-and-solve text-initial 80)))))
 
