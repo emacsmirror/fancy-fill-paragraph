@@ -178,6 +178,73 @@ would change the string's runtime value."
         (should (equal text (buffer-string)))))))
 
 
+(ert-deftest fill-syntax-bounds-c-comment-trailing-code-no-error ()
+  "Code sharing a line after \"*/\" must not signal and must be untouched.
+The comment region must end at the closer, not at end-of-line."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "/* note */ x = 1;\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 4)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-string-trailing-code-untouched ()
+  "Code sharing a line after a string closer must not be reflowed.
+The string region must end at the closer, not at end-of-line; the
+code's own spacing (here around \"+\") must survive filling from
+inside the string."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "x = \"\"\"aaa\"\"\"  +  y\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 10)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-comment-trailing-code-region-no-error ()
+  "Active region inside \"/* ... */ code;\" must not signal or modify code.
+The region path dispatches through the same inline fill as the
+point path and crashed the same way."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "/* note */ x = 1;\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 4)
+        (set-mark 9)
+        (activate-mark)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-comment-trailing-code-multiline-body-fills ()
+  "A multi-line block comment with code after \"*/\" still fills its body.
+Trailing code only skips the inline fill; the multi-line body fill
+excludes the closer line, so it must keep working and the closer
+line (with its code) must be untouched."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat "/* aaa bbb.\n" " * ccc ddd eee fff ggg hhh iii jjj.\n" " * kkk */ x = 1;\n"))
+        (text-expected
+         (concat "/* aaa bbb. ccc ddd eee fff\n" " * ggg hhh iii jjj.\n" " * kkk */ x = 1;\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 20)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
 

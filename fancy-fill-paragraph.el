@@ -612,6 +612,18 @@ paragraph scanning should widen the returned bounds themselves."
       (when (and (zerop (forward-line 1)) (> body-end (point)))
         (cons (point) body-end)))))
 
+(defun fancy-fill-paragraph--code-after-closer-p (closer-end)
+  "Return non-nil when non-blank text follows CLOSER-END on its line.
+CLOSER-END is the position just after a comment or string closing
+delimiter.  Trailing code on the closer line must never be reflowed
+as comment or string text, so callers skip inline filling for such
+regions."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char closer-end)
+    (skip-chars-forward " \t" (pos-eol))
+    (not (eolp))))
+
 (defun fancy-fill-paragraph--syntax-comment-end-p ()
   "Return non-nil if point follows a block comment closer.
 Newlines are excluded because they terminate line comments,
@@ -1235,14 +1247,28 @@ prefix, fills, then restores the opener."
             cont-prefix
             (plist-get opener-info :prefix)
             (plist-get opener-info :text)
-            (lambda
-              (para-beg para-end)
+            (lambda (para-beg para-end)
               (fancy-fill-paragraph--fill-block-comment-body para-beg para-end cont-prefix))
             (or sel-beg pos)
             (or sel-end pos)))
          (lambda ()
-           (fancy-fill-paragraph--fill-block-comment-inline
-            beg end comment-start-pos cont-prefix (plist-get opener-info :content-col))))))))
+           (let ((closer-end
+                  (save-excursion
+                    (goto-char comment-start-pos)
+                    (forward-comment 1)
+                    (point))))
+             (cond
+              ;; Code after the closer shares the region; reflowing it
+              ;; as comment text would corrupt it.
+              ((fancy-fill-paragraph--code-after-closer-p closer-end)
+               nil)
+              (t
+               (fancy-fill-paragraph--fill-block-comment-inline
+                beg
+                end
+                comment-start-pos
+                cont-prefix
+                (plist-get opener-info :content-col)))))))))))
 
 (defun fancy-fill-paragraph--string-opener-info (opener-pos)
   "Return a plist describing the string opener at OPENER-POS.
@@ -1300,7 +1326,23 @@ of the text."
         #'fancy-fill-paragraph--fill-region
         (or sel-beg (point))
         (or sel-end (point))))
-     (lambda () (fancy-fill-paragraph--fill-region beg end)))))
+     (lambda ()
+       (let ((closer-end
+              (condition-case nil
+                  (save-excursion
+                    (goto-char opener-pos)
+                    (forward-sexp 1)
+                    (point))
+                (scan-error
+                 nil))))
+         (cond
+          ;; Code after the closer shares the region; reflowing it as
+          ;; string text would corrupt it.  A scan error means the
+          ;; closer cannot be located; skip the fill in both cases.
+          ((or (null closer-end) (fancy-fill-paragraph--code-after-closer-p closer-end))
+           nil)
+          (t
+           (fancy-fill-paragraph--fill-region beg end))))))))
 
 (defun fancy-fill-paragraph--replace-region (beg end result)
   "Replace the region BEG..END with RESULT when it differs.
