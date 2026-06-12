@@ -1723,6 +1723,28 @@ line (with its code) must be untouched."
           (fancy-fill-paragraph)
           (should (equal text-initial (buffer-string))))))))
 
+(ert-deftest fill-false-dot-point-on-fitting-line-stays-joined ()
+  "False dot-point prevention must not split text that fits on one line."
+  (let* ((text-initial "alpha beta * gamma\n")
+         (text-expected text-initial)
+         (fill-column 40)
+         (sentence-end-double-space nil))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char 2)
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
+(ert-deftest fill-numbered-false-dot-point-on-fitting-line-stays-joined ()
+  "Regexp dot-point prevention must not split text that fits on one line."
+  (let* ((text-initial "alpha beta 2. gamma\n")
+         (text-expected text-initial)
+         (fill-column 40)
+         (sentence-end-double-space nil))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char 2)
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
 (ert-deftest fill-indent-split-mixed-dot-points-unwrap ()
   "Wrapped text with mixed indentation and dot-points unwraps to canonical form."
   (let
