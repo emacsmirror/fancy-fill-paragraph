@@ -1615,7 +1615,7 @@ Uses dynamic programming to minimize raggedness."
                 ;; Pre-extend to a 2-item line before the loop (single-item
                 ;; was handled above), so the while body always has j < i-1.
                 (setq line-len (+ (aref lens j) (aref sep-lens j) line-len))
-                (let ((join-weight-sum (aref break-weights j)))
+                (let ((join-weight-sum (max 0 (aref break-weights j))))
                   (while (and (>= j 0) (<= line-len local-fill-column))
                     (let ((prev-cost (aref cost j)))
                       (when (< prev-cost best-cost-i)
@@ -1640,7 +1640,8 @@ Uses dynamic programming to minimize raggedness."
                     (setq j (1- j))
                     (when (>= j 0)
                       (setq line-len (+ (aref lens j) (aref sep-lens j) line-len))
-                      (setq join-weight-sum (+ join-weight-sum (aref break-weights j))))))))))
+                      (setq join-weight-sum
+                            (+ join-weight-sum (max 0 (aref break-weights j)))))))))))
         (setq i (1+ i))))
 
     ;; Reconstruct lines by walking `from' backwards from n to 0.
