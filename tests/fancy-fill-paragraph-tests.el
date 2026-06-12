@@ -1141,6 +1141,33 @@ line (with its code) must be untouched."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-prefix-mismatch-preserves-non-whitespace-prefix ()
+  "Fallback prefix validation must not delete non-whitespace prefix chars."
+  (let ((fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial "; a\n; b\n  c\n"))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char 2)
+      (fancy-fill-paragraph)
+      (should (= 2 (how-many ";" (point-min) (point-max)))))))
+
+(ert-deftest fill-prefix-mismatch-preserves-many-non-whitespace-prefixes ()
+  "Fallback validation must preserve many prefix markers before mismatches."
+  (let ((fill-column 36)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat
+          ";; alpha beta gamma delta.\n"
+          ";; epsilon zeta eta theta.\n"
+          ";; iota kappa lambda mu.\n"
+          "   nu xi omicron pi rho.\n"
+          "  sigma tau upsilon phi chi psi omega.\n")))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char 4)
+      (fancy-fill-paragraph)
+      (should (= 6 (how-many ";" (point-min) (point-max)))))))
+
 (ert-deftest fill-prefix-dot-point-not-propagated ()
   "Dot-point prefix is not added to every line when dot-point mode is off."
   (let ((text-initial

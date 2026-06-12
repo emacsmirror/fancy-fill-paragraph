@@ -1405,14 +1405,13 @@ If PREFIX does not match every line, fall back to the minimum line indent."
       (goto-char beg)
       (let ((all-match t)
             (min-indent most-positive-fixnum))
-        ;; Early exit: once a mismatch is found and min-indent reaches 0,
-        ;; the result is "" regardless of remaining lines.
+        ;; Early exit: after every visited line has contributed to
+        ;; `min-indent', a mismatch plus zero indent fixes the result at "".
         (while (and (< (point) end) (or all-match (> min-indent 0)))
           (let ((line (buffer-substring-no-properties (point) (pos-eol))))
+            (setq min-indent (min min-indent (fancy-fill-paragraph--leading-indent line)))
             (when (and all-match (not (string-prefix-p prefix line)))
-              (setq all-match nil))
-            (unless all-match
-              (setq min-indent (min min-indent (fancy-fill-paragraph--leading-indent line)))))
+              (setq all-match nil)))
           (forward-line 1))
         (cond
          (all-match
