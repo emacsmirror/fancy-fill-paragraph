@@ -1082,6 +1082,19 @@ line (with its code) must be untouched."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-region-same-size-reflow-returns-changed ()
+  "Region fill should report changes even when buffer size is unchanged."
+  (let ((text-initial "aaa bbb\nccc ddd\n")
+        (text-expected "aaa bbb ccc ddd\n")
+        (fill-column 20))
+    (with-fancy-fill-paragraph-test text-initial
+      (transient-mark-mode 1)
+      (goto-char (point-max))
+      (push-mark (point-min) t t)
+      (let ((changed (fancy-fill-paragraph)))
+        (should (equal text-expected (buffer-string)))
+        (should changed)))))
+
 
 ;; ---------------------------------------------------------------------------
 ;; Prefix Tests
