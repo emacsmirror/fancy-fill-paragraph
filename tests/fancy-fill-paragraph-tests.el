@@ -35,6 +35,65 @@
        (buffer-reset-text ,initial-buffer-text)
        ,@body)))
 
+(defmacro with-advice (advice &rest body)
+  "Execute BODY with ADVICE temporarily enabled.
+
+Each advice is a triplet of (SYMBOL HOW FUNCTION),
+see `advice-add' documentation."
+  (declare (indent 1))
+  (let ((advice-list advice)
+        (body-let nil)
+        (body-advice-add nil)
+        (body-advice-remove nil)
+        (item nil))
+    (unless (listp advice-list)
+      (error "Advice must be a list"))
+    (cond
+     ((null advice-list)
+      (error "Advice must be a list containing at least one item"))
+     (t
+      (while (setq item (pop advice-list))
+        (unless (and (listp item) (eq 3 (length item)))
+          (error "Each advice must be a list of 3 items"))
+        (let ((fn-sym (gensym))
+              (fn-advise (pop item))
+              (fn-advice-ty (pop item))
+              (fn-body (pop item)))
+          ;; Build the calls for each type.
+          (push (list fn-sym fn-body) body-let)
+          (push (list 'advice-add fn-advise fn-advice-ty fn-sym) body-advice-add)
+          (push (list 'advice-remove fn-advise fn-sym) body-advice-remove)))
+      (setq body-let (nreverse body-let))
+      (setq body-advice-add (nreverse body-advice-add))
+
+      ;; Compose the call.
+      `(let ,body-let
+         (unwind-protect
+             (progn
+               ,@body-advice-add
+               ,@body)
+           ,@body-advice-remove))))))
+
+(defmacro with-forward-line-stall-guard (&rest body)
+  "Run BODY and signal when repeated `forward-line' calls stop advancing."
+  (declare (indent 0))
+  `(let ((forward-line-stall-count 0))
+     (with-advice
+         (('forward-line
+           :around
+           (lambda (forward-line-original &optional arg)
+             (let ((before (point))
+                   (step (or arg 1)))
+               (prog1 (funcall forward-line-original arg)
+                 (cond
+                  ((and (> step 0) (= (point) before))
+                   (setq forward-line-stall-count (1+ forward-line-stall-count))
+                   (when (> forward-line-stall-count 1)
+                     (error "forward-line stopped advancing repeatedly")))
+                  (t
+                   (setq forward-line-stall-count 0))))))))
+       ,@body)))
+
 (defun test-split-items (text)
   "Split TEXT and return the items list."
   (plist-get (fancy-fill-paragraph--paragraph-to-items text) :items))
@@ -830,6 +889,31 @@ line (with its code) must be untouched."
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
+
+(ert-deftest strip-region-lines-end-past-point-max-does-not-stall ()
+  "A stale END past `point-max' must not make line stripping loop forever."
+  (with-fancy-fill-paragraph-test "aaa  bbb\n"
+    (with-forward-line-stall-guard
+      (should (equal '("aaa  bbb") (fancy-fill-paragraph--strip-region-lines 1 12 0))))))
+
+(ert-deftest fill-region-end-past-point-max-does-not-stall ()
+  "A stale END past `point-max' must not make filling loop forever."
+  (let ((fill-column 70)
+        ;; Avoid unrelated prefix detection so this exercises the TODO #11 path.
+        (fill-prefix ""))
+    (with-fancy-fill-paragraph-test "aaa  bbb\n"
+      (with-forward-line-stall-guard
+        (fancy-fill-paragraph--fill-region 1 12))
+      (should (equal "aaa bbb" (buffer-string))))))
+
+(ert-deftest fill-region-end-past-point-max-with-prefix-does-not-stall ()
+  "A stale END past `point-max' must be clamped before prefix validation."
+  (let ((fill-column 70)
+        (fill-prefix "> "))
+    (with-fancy-fill-paragraph-test "> aaa  bbb\n"
+      (with-forward-line-stall-guard
+        (fancy-fill-paragraph--fill-region 1 13))
+      (should (equal "> aaa bbb" (buffer-string))))))
 
 
 ;; ---------------------------------------------------------------------------
