@@ -245,6 +245,48 @@ line (with its code) must be untouched."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-c-comment-tab-indentation-preserves-content ()
+  "Tab-indented block comments must not strip body content while filling."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text-initial "  \t/* aaa bbb ccc ddd\n  \t * eee fff ggg hhh\n  \t */\n")
+        (text-expected "  \t/* aaa bbb ccc ddd eee fff ggg hhh\n  \t */\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 8)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-comment-body-tab-indentation-preserves-content ()
+  "Tab-indented block-comment body lines must not strip content while filling."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text-initial "  \t/*\n  \t * aaa bbb ccc ddd\n  \t * eee fff ggg hhh\n  \t */\n")
+        (text-expected "  \t/*\n  \t * aaa bbb ccc ddd eee fff ggg hhh\n  \t */\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 11)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-python-string-tab-indentation-preserves-content ()
+  "Tab-indented multi-line strings must not strip body content while filling."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text-initial "  \t\"\"\"Aaa bbb\n  \tCcc ddd eee\n  \t\"\"\"\n")
+        (text-expected "  \t\"\"\"Aaa bbb Ccc ddd eee\n  \t\"\"\"\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 8)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
 

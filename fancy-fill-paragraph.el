@@ -1041,13 +1041,14 @@ can fill later paragraphs first without invalidating earlier positions."
       result)))
 
 (defun fancy-fill-paragraph--fill-prefixed-paragraph
-    (lines replace-beg replace-end cont-prefix &optional first-prefix)
+    (lines replace-beg replace-end cont-prefix &optional first-prefix prefix-col)
   "Fill LINES with CONT-PREFIX and replace REPLACE-BEG..REPLACE-END.
 FIRST-PREFIX, when non-nil, is used on the first output line instead
 of CONT-PREFIX (e.g. for a comment opener like \"/* \").
+PREFIX-COL, when non-nil, is the buffer-measured width of CONT-PREFIX.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
-  (let* ((prefix-col (string-width cont-prefix))
+  (let* ((prefix-col (or prefix-col (string-width cont-prefix)))
          (result
           (fancy-fill-paragraph--fill-and-reprefix
            lines (max 1 (- fill-column prefix-col)) cont-prefix
@@ -1096,12 +1097,12 @@ is non-nil it is prepended as the first line (e.g. opener-line body text).
 FIRST-PREFIX, when non-nil, is used on the first output line.
 REPLACE-BEG, when non-nil, overrides BEG as the replacement start
 \(e.g. to include the opener line in the replaced span).
-PREFIX-COL, when non-nil, is the column count to strip, overriding
-the `string-width' of CONT-PREFIX (which misreports tabs whose width
-depends on the column they start at).
+PREFIX-COL, when non-nil, overrides the buffer-measured width of
+CONT-PREFIX at BEG (e.g. line comments may strip fewer columns than
+the literal prefix string occupies).
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
-  (let* ((prefix-col (or prefix-col (string-width cont-prefix)))
+  (let* ((prefix-col (or prefix-col (fancy-fill-paragraph--prefix-column-width beg cont-prefix)))
          (lines
           (fancy-fill-paragraph--strip-region-lines beg (min (1+ end) (point-max)) prefix-col))
          (lines
@@ -1111,7 +1112,8 @@ Returns non-nil when the buffer was modified."
            (t
             lines))))
     (fancy-fill-paragraph--fill-prefixed-paragraph lines (or replace-beg beg) end cont-prefix
-                                                   first-prefix)))
+                                                   first-prefix
+                                                   prefix-col)))
 
 (defun fancy-fill-paragraph--string-continuation-prefix (inner-body)
   "Return the continuation prefix for a multi-line string with opener text.
@@ -1138,7 +1140,7 @@ overlapping paragraphs (callers should default to point when not
 region-restricted).
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
-  (let* ((prefix-col (string-width cont-prefix))
+  (let* ((prefix-col (fancy-fill-paragraph--prefix-column-width (car inner-body) cont-prefix))
          ;; Widen body to include the opener line when it carries text,
          ;; so paragraph detection sees it as part of the first paragraph.
          (scan-body
