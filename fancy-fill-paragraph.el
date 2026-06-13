@@ -2019,11 +2019,6 @@ and re-adds the prefix to each output line."
       (fancy-fill-paragraph--replace-region
        beg end (mapconcat (lambda (line) (concat prefix line)) filled "\n")))))
 
-
-;; ---------------------------------------------------------------------------
-;; Public Functions
-
-;;;###autoload
 (defun fancy-fill-paragraph--by-region-impl ()
   "Fill paragraphs in the active region.
 When the region is entirely inside a single comment or string,
@@ -2136,6 +2131,10 @@ Returns non-nil when the buffer was modified."
         changed))
      (t
       (fancy-fill-paragraph--fill-region beg end)))))
+
+
+;; ---------------------------------------------------------------------------
+;; Public Functions
 
 ;;;###autoload
 (defun fancy-fill-paragraph ()
