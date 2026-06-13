@@ -245,6 +245,47 @@ line (with its code) must be untouched."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-line-comment-leading-code-untouched ()
+  "Code sharing a line before a Python comment must not be reflowed."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "x = 1  # aaa\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 10)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-c-line-comment-leading-code-untouched ()
+  "Code before an aligned trailing C++ line comment must not be reflowed."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (sentence-end-double-space nil)
+        (text-initial "int x;  // aaa\n        // bbb\n")
+        (text-expected "int x;  // aaa bbb\n"))
+    (with-temp-buffer
+      (c++-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 27)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-line-comment-adjacent-leading-code-untouched ()
+  "Adjacent trailing line comments must not delete intervening code."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (text "x = 1  # aaa\ny = 2  # bbb\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char 22)
+        (fancy-fill-paragraph)
+        (should (equal text (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-c-comment-tab-indentation-preserves-content ()
   "Tab-indented block comments must not strip body content while filling."
   (let ((fancy-fill-paragraph-syntax-bounds t)
