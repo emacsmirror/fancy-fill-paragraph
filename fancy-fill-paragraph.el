@@ -300,9 +300,13 @@ so callers can fill them without invalidating earlier positions."
 
 (defun fancy-fill-paragraph--fill-paragraph-bounds (bounds)
   "Fill each paragraph in BOUNDS.
-BOUNDS is a reverse-ordered list of (BEG . END) pairs."
-  (dolist (para-bounds bounds)
-    (fancy-fill-paragraph--fill-region (car para-bounds) (cdr para-bounds))))
+BOUNDS is a reverse-ordered list of (BEG . END) pairs.
+Return non-nil when any paragraph was modified."
+  (let ((changed nil))
+    (dolist (para-bounds bounds)
+      (when (fancy-fill-paragraph--fill-region (car para-bounds) (cdr para-bounds))
+        (setq changed t)))
+    changed))
 
 
 ;; ---------------------------------------------------------------------------
@@ -2091,9 +2095,9 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
                                                                   beg
                                                                   end))))
          (t
-          (fancy-fill-paragraph--fill-paragraph-bounds
-           (fancy-fill-paragraph--collect-paragraph-bounds beg end t))
-          (setq changed (/= buf-size (buffer-size)))))))
+          (setq changed
+                (fancy-fill-paragraph--fill-paragraph-bounds
+                 (fancy-fill-paragraph--collect-paragraph-bounds beg end t)))))))
     ;; Restore mark/point in original direction, deactivate mark.
     (let ((end-adjusted (+ end (- (buffer-size) buf-size))))
       (cond
