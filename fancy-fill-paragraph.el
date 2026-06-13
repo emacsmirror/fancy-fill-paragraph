@@ -1558,6 +1558,7 @@ If PREFIX does not match every line, fall back to the minimum line indent."
 (defun fancy-fill-paragraph--strip-region-lines (beg end prefix-column-width)
   "Return region lines from BEG..END with PREFIX-COLUMN-WIDTH stripped."
   (declare (important-return-value t))
+  (setq end (min end (point-max)))
   (save-excursion
     (let ((result nil))
       (goto-char beg)
@@ -2070,6 +2071,7 @@ no dot-points are found."
 Detects the fill prefix, strips it, normalizes blank-space,
 splits at delimiter boundaries, solves for optimal line breaks,
 and re-adds the prefix to each output line."
+  (setq end (min end (point-max)))
   (let* ((dp-list (fancy-fill-paragraph--compile-dot-point-patterns))
          (prefix-info (fancy-fill-paragraph--analyze-fill-prefix beg end dp-list))
          (prefix (car prefix-info))
