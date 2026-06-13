@@ -753,8 +753,8 @@ whole.  Return nil when POS is not at a delimiter."
      (t
       nil))))
 
-(defun fancy-fill-paragraph--line-comment-at-col-p (indent-col delim-str)
-  "Return non-nil when the current line has a line comment at INDENT-COL.
+(defun fancy-fill-paragraph--line-comment-pos-at-col (indent-col delim-str)
+  "Return line comment opener at INDENT-COL, or nil.
 DELIM-STR is the delimiter run of the block opener; a comment whose
 run differs belongs to another block (\";;\" must not absorb \";;;\"
 nor \"#\" absorb \"##\"), since the continuation prefix is stripped
@@ -767,7 +767,38 @@ by column and would delete or distort a mismatched delimiter."
     (and (= (move-to-column indent-col) indent-col)
          (fancy-fill-paragraph--line-comment-opener-at-point-p)
          (let ((delim-end (fancy-fill-paragraph--line-comment-delimiter-end (point))))
-           (and delim-end (equal delim-str (buffer-substring-no-properties (point) delim-end)))))))
+           (and delim-end
+                (equal delim-str (buffer-substring-no-properties (point) delim-end))
+                (point))))))
+
+(defun fancy-fill-paragraph--line-comment-at-col-p (indent-col delim-str)
+  "Return non-nil when the current line has a line comment at INDENT-COL.
+DELIM-STR is the expected delimiter run."
+  (declare (important-return-value t))
+  (not (null (fancy-fill-paragraph--line-comment-pos-at-col indent-col delim-str))))
+
+(defun fancy-fill-paragraph--line-comment-fill-beg (comment-pos)
+  "Return the fill start for the line comment at COMMENT-POS.
+When non-blank code precedes the comment opener, start at COMMENT-POS;
+otherwise include the line's indentation by starting at BOL."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char comment-pos)
+    (let ((line-beg (pos-bol)))
+      (goto-char line-beg)
+      (skip-chars-forward " \t" comment-pos)
+      (cond
+       ((< (point) comment-pos)
+        comment-pos)
+       (t
+        line-beg)))))
+
+(defun fancy-fill-paragraph--line-comment-fill-beg-at-col (indent-col delim-str)
+  "Return fill start for a matching line comment at INDENT-COL, or nil.
+DELIM-STR is the expected delimiter run."
+  (declare (important-return-value t))
+  (let ((comment-pos (fancy-fill-paragraph--line-comment-pos-at-col indent-col delim-str)))
+    (and comment-pos (fancy-fill-paragraph--line-comment-fill-beg comment-pos))))
 
 (defun fancy-fill-paragraph--line-comment-bounds (opener-pos beg end)
   "Return (BLOCK-BEG . BLOCK-END) for consecutive line comments around OPENER-POS.
@@ -778,44 +809,73 @@ are included."
   (declare (important-return-value t))
   (save-excursion
     (goto-char opener-pos)
-    (let ((indent-col (fancy-fill-paragraph--line-comment-indent-col opener-pos))
-          (delim-str
-           (let ((delim-end (fancy-fill-paragraph--line-comment-delimiter-end opener-pos)))
-             (and delim-end (buffer-substring-no-properties opener-pos delim-end))))
-          (block-beg (pos-bol))
-          (block-end (pos-eol)))
+    (let* ((indent-col (fancy-fill-paragraph--line-comment-indent-col opener-pos))
+           (delim-str
+            (let ((delim-end (fancy-fill-paragraph--line-comment-delimiter-end opener-pos)))
+              (and delim-end (buffer-substring-no-properties opener-pos delim-end))))
+           (block-beg (fancy-fill-paragraph--line-comment-fill-beg opener-pos))
+           (opener-full-line (= block-beg (pos-bol)))
+           (block-end (pos-eol)))
       ;; Scan backward.
-      (while (and (zerop (forward-line -1))
-                  (>= (point) beg)
-                  (fancy-fill-paragraph--line-comment-at-col-p indent-col delim-str))
-        (setq block-beg (pos-bol)))
+      (when opener-full-line
+        (let ((done nil))
+          (while (and (not done) (zerop (forward-line -1)) (>= (point) beg))
+            (let ((line-beg (pos-bol))
+                  (fill-beg
+                   (fancy-fill-paragraph--line-comment-fill-beg-at-col indent-col delim-str)))
+              (cond
+               ((null fill-beg)
+                (setq done t))
+               (t
+                (setq block-beg fill-beg)
+                (unless (= fill-beg line-beg)
+                  (setq done t))))))))
       ;; Scan forward.
       (goto-char opener-pos)
-      (while (and (zerop (forward-line 1))
-                  (<= (point) end)
-                  (fancy-fill-paragraph--line-comment-at-col-p indent-col delim-str))
-        (setq block-end (pos-eol)))
+      (let ((done nil))
+        (while (and (not done) (zerop (forward-line 1)) (<= (point) end))
+          (let ((line-beg (pos-bol))
+                (fill-beg
+                 (fancy-fill-paragraph--line-comment-fill-beg-at-col indent-col delim-str)))
+            (cond
+             ((null fill-beg)
+              (setq done t))
+             ((= fill-beg line-beg)
+              (setq block-end (pos-eol)))
+             (t
+              (setq done t)))
+            (goto-char (pos-eol)))))
       (cons block-beg block-end))))
 
 (defun fancy-fill-paragraph--line-comment-prefix (beg end)
-  "Return (PREFIX . PREFIX-COL) for the line comment block BEG..END.
+  "Return prefix info for line comment block BEG..END.
 BEG may be at the line beginning, anywhere in the leading blank-space,
 or at the comment-start delimiter itself.
-PREFIX holds the first line's indentation and delimiter run followed
-by blank-space whose width is the narrowest delimiter-to-content gap
-of any block line, so that stripping PREFIX-COL columns never removes
-content characters.  Delimiter-only lines do not constrain the gap;
-stripping clamps at their end-of-line.
-PREFIX-COL is the buffer column at which PREFIX ends.  It is derived
-from buffer columns rather than `string-width', which misreports tabs
-whose width depends on the column they start at."
+The returned plist has these keys:
+- :prefix holds the first line's indentation and delimiter run followed
+  by blank-space whose width is the narrowest delimiter-to-content gap.
+- :prefix-col is the buffer column at which :prefix ends.
+- :first-prefix is non-nil for trailing comments that share a line with
+  code; replacing from the comment opener then leaves the code intact
+  while continuation lines stay aligned to the opener column."
   (declare (important-return-value t))
   (save-excursion
     (goto-char beg)
     ;; Skip leading blank-space (no-op when BEG is at the delimiter).
     (skip-chars-forward " \t" (pos-eol))
-    (let* ((delim-end (or (fancy-fill-paragraph--line-comment-delimiter-end (point)) (point)))
-           (head (buffer-substring-no-properties (pos-bol) delim-end))
+    (let* ((comment-pos (point))
+           (trailing-comment
+            (= (fancy-fill-paragraph--line-comment-fill-beg comment-pos) comment-pos))
+           (delim-end
+            (or (fancy-fill-paragraph--line-comment-delimiter-end comment-pos) comment-pos))
+           (delim-str (buffer-substring-no-properties comment-pos delim-end))
+           (indent-col (current-column))
+           (head
+            (cond
+             (trailing-comment
+              (concat (make-string indent-col ?\s) delim-str))
+             (t
+              (buffer-substring-no-properties (pos-bol) delim-end))))
            (run-end-col
             (progn
               (goto-char delim-end)
@@ -843,7 +903,10 @@ whose width depends on the column they start at."
          (t
           (goto-char (point-max)))))
       (let ((gap (or gap 0)))
-        (cons (concat head (make-string gap ?\s)) (+ run-end-col gap))))))
+        (list
+         :prefix (concat head (make-string gap ?\s))
+         :prefix-col (+ run-end-col gap)
+         :first-prefix (and trailing-comment (concat delim-str (make-string gap ?\s))))))))
 
 (defun fancy-fill-paragraph--fill-line-comment-region (beg end &optional sel-beg sel-end)
   "Fill a line-comment block in the region BEG..END.
@@ -857,16 +920,20 @@ When SEL-BEG and SEL-END are non-nil, fill only paragraphs
 overlapping that selection.  Otherwise fill the paragraph at point."
   (let ((pos (point)))
     (save-excursion
-      (let ((prefix-col (cdr (fancy-fill-paragraph--line-comment-prefix beg end))))
+      (let ((prefix-col
+             (plist-get (fancy-fill-paragraph--line-comment-prefix beg end) :prefix-col)))
         (fancy-fill-paragraph--fill-body-paragraphs
          beg end prefix-col (or sel-beg pos) (or sel-end pos)
          (lambda (para-beg para-end)
-           (let ((prefix-and-col (fancy-fill-paragraph--line-comment-prefix para-beg para-end)))
-             (fancy-fill-paragraph--fill-prefixed-region para-beg para-end (car prefix-and-col)
+           (let* ((prefix-info (fancy-fill-paragraph--line-comment-prefix para-beg para-end))
+                  (prefix (plist-get prefix-info :prefix))
+                  (first-prefix (plist-get prefix-info :first-prefix))
+                  (prefix-col (plist-get prefix-info :prefix-col)))
+             (fancy-fill-paragraph--fill-prefixed-region para-beg para-end prefix
+                                                         first-prefix
                                                          nil
                                                          nil
-                                                         nil
-                                                         (cdr prefix-and-col)))))))))
+                                                         prefix-col))))))))
 
 (defun fancy-fill-paragraph--comment-or-string-regions (beg end pos)
   "Return list of (BEG END FILL-FN) for each syntax region in BEG..END.
