@@ -478,6 +478,95 @@ ENTRY is one element of `fancy-fill-paragraph-infix-delimiters'."
 ;; Forward declaration; defined as `defconst' below after its dependencies.
 (defvar fancy-fill-paragraph--delimiter-table)
 
+(defun fancy-fill-paragraph--syntax-fill-job-create (&rest plist)
+  "Return an internal syntax fill job from PLIST.
+PLIST must contain these keys:
+- :beg is the region start passed to the fill function.
+- :end is the region end passed to the fill function.
+- :fill-fn is the function that performs the fill.
+- :args are extra arguments appended after :beg and :end.
+- :resume is where syntax scanning continues after this job.
+
+The :args value may be nil; all other values must be non-nil."
+  (declare (important-return-value t))
+
+  (unless (and plist (listp plist))
+    (error "Syntax fill job values must be a property list"))
+
+  (let* ((unset (make-symbol "unset"))
+         (kw-beg unset)
+         (kw-end unset)
+         (kw-fill-fn unset)
+         ;; `:args' may be nil, so use a sentinel to detect omission.
+         (kw-args unset)
+         (kw-resume unset)
+         ;; Iteration variables.
+         (keyw nil)
+         (val nil))
+
+    (while (keywordp (setq keyw (car plist)))
+      (setq plist (cdr plist))
+      (setq val (pop plist))
+      (pcase keyw
+        (:beg (setq kw-beg val))
+        (:end (setq kw-end val))
+        (:fill-fn (setq kw-fill-fn val))
+        (:args (setq kw-args val))
+        (:resume (setq kw-resume val))
+        (_ (error "Unexpected syntax fill job key: %S" keyw))))
+
+    (when plist
+      (error "Unexpected trailing syntax fill job values: %S" plist))
+
+    ;; Ensure required keywords.
+    (unless (and (not (eq kw-beg unset)) (integer-or-marker-p kw-beg))
+      (error "Syntax fill job :beg must be a buffer position"))
+    (unless (and (not (eq kw-end unset)) (integer-or-marker-p kw-end))
+      (error "Syntax fill job :end must be a buffer position"))
+    (unless (and (not (eq kw-fill-fn unset)) (functionp kw-fill-fn))
+      (error "Syntax fill job :fill-fn must be a function"))
+    (unless (and (not (eq kw-args unset)) (listp kw-args))
+      (error "Syntax fill job :args must be a list"))
+    (unless (and (not (eq kw-resume unset)) (integer-or-marker-p kw-resume))
+      (error "Syntax fill job :resume must be a buffer position"))
+
+    `[
+      ;; 0: beg.
+      ,kw-beg
+      ;; 1: end.
+      ,kw-end
+      ;; 2: fill-fn.
+      ,kw-fill-fn
+      ;; 3: args.
+      ,kw-args
+      ;; 4: resume.
+      ,kw-resume]))
+
+(defsubst fancy-fill-paragraph--syntax-fill-job-beg (job)
+  "Return the beginning position for syntax fill JOB."
+  (declare (important-return-value t))
+  (aref job 0))
+
+(defsubst fancy-fill-paragraph--syntax-fill-job-end (job)
+  "Return the end position for syntax fill JOB."
+  (declare (important-return-value t))
+  (aref job 1))
+
+(defsubst fancy-fill-paragraph--syntax-fill-job-fill-fn (job)
+  "Return the fill function for syntax fill JOB."
+  (declare (important-return-value t))
+  (aref job 2))
+
+(defsubst fancy-fill-paragraph--syntax-fill-job-args (job)
+  "Return the extra fill arguments for syntax fill JOB."
+  (declare (important-return-value t))
+  (aref job 3))
+
+(defsubst fancy-fill-paragraph--syntax-fill-job-resume (job)
+  "Return the scan resume position for syntax fill JOB."
+  (declare (important-return-value t))
+  (aref job 4))
+
 (defun fancy-fill-paragraph--active-delimiters ()
   "Return a vector of active delimiter entries in matching priority order."
   (declare (important-return-value t))
@@ -935,13 +1024,97 @@ overlapping that selection.  Otherwise fill the paragraph at point."
                                                          nil
                                                          prefix-col))))))))
 
-(defun fancy-fill-paragraph--comment-or-string-regions (beg end pos)
-  "Return list of (BEG END FILL-FN) for each syntax region in BEG..END.
+(defun fancy-fill-paragraph--line-comment-syntax-start-p (syn-start)
+  "Return non-nil when SYN-START begins a line comment."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char syn-start)
+    (and (forward-comment 1) (not (fancy-fill-paragraph--syntax-comment-end-p)))))
+
+(defun fancy-fill-paragraph--syntax-fill-job-at (syn-start &optional sel-bounds search-bounds)
+  "Return a syntax fill job for the region starting at SYN-START.
+When SEL-BOUNDS is non-nil, include its bounds so only overlapping
+paragraphs are filled by the job runner.
+SEARCH-BOUNDS limits line-comment block expansion."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char syn-start)
+    (let ((region-beg (pos-bol))
+          (sel-beg (car sel-bounds))
+          (sel-end (cdr sel-bounds)))
+      (cond
+       ;; Block comment: advance past closer via forward-comment.
+       ;; Check `--syntax-comment-end-p' to exclude line comments
+       ;; (whose closer is a newline, not a block-comment ender).
+       ((and (forward-comment 1) (fancy-fill-paragraph--syntax-comment-end-p))
+        (fancy-fill-paragraph--syntax-fill-job-create
+         :beg region-beg
+         :end (pos-eol)
+         :fill-fn #'fancy-fill-paragraph--fill-block-comment-region
+         :args (list syn-start sel-beg sel-end)
+         :resume (point)))
+       ;; Line comment: find the full block and skip past it.
+       ((progn
+          (goto-char syn-start)
+          (fancy-fill-paragraph--line-comment-syntax-start-p syn-start))
+        (let ((bounds
+               (fancy-fill-paragraph--line-comment-bounds
+                syn-start
+                (or (car search-bounds) (point-min))
+                (or (cdr search-bounds) (point-max)))))
+          (fancy-fill-paragraph--syntax-fill-job-create
+           :beg (car bounds)
+           :end (cdr bounds)
+           :fill-fn #'fancy-fill-paragraph--fill-line-comment-region
+           :args (list sel-beg sel-end)
+           :resume (1+ (cdr bounds)))))
+       ;; String: advance past closer via forward-sexp.
+       ((progn
+          (goto-char syn-start)
+          (fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after (point))))
+        (condition-case nil
+            (progn
+              (forward-sexp 1)
+              (fancy-fill-paragraph--syntax-fill-job-create
+               :beg region-beg
+               :end (pos-eol)
+               :fill-fn #'fancy-fill-paragraph--fill-string-region
+               :args (list syn-start sel-beg sel-end)
+               :resume (point)))
+          (scan-error
+           nil)))
+       (t
+        nil)))))
+
+(defun fancy-fill-paragraph--syntax-fill-job-run (job)
+  "Run syntax fill JOB and return non-nil when it modified the buffer."
+  (declare (important-return-value t))
+  (apply (fancy-fill-paragraph--syntax-fill-job-fill-fn job)
+         (fancy-fill-paragraph--syntax-fill-job-beg job)
+         (fancy-fill-paragraph--syntax-fill-job-end job)
+         (fancy-fill-paragraph--syntax-fill-job-args job)))
+
+(defun fancy-fill-paragraph--syntax-fill-jobs-run (jobs &optional reverse)
+  "Run syntax fill JOBS.
+When REVERSE is non-nil, fill later jobs first so earlier buffer
+positions remain valid."
+  (declare (important-return-value t))
+  (let ((changed nil)
+        (jobs
+         (cond
+          (reverse
+           (reverse jobs))
+          (t
+           jobs))))
+    (dolist (job jobs)
+      (when (fancy-fill-paragraph--syntax-fill-job-run job)
+        (setq changed t)))
+    changed))
+
+(defun fancy-fill-paragraph--syntax-fill-jobs-in-range (beg end pos)
+  "Return syntax fill jobs for comment or string regions in BEG..END.
 POS is the cursor position, used to detect when point is inside a
 comment or string whose opener precedes BEG.
-Each entry spans from `pos-bol' of the opener to `pos-eol' of the closer.
-Block comments and line-comment blocks include the opener position
-as a fourth element.
 Returns nil when no syntax boundaries are found."
   (declare (important-return-value t))
   (save-excursion
@@ -949,7 +1122,7 @@ Returns nil when no syntax boundaries are found."
     ;; Modes like `python-mode' rely on `syntax-propertize-function'
     ;; to mark triple-quoted strings.
     (syntax-propertize end)
-    (let ((regions nil))
+    (let ((jobs nil))
       (goto-char beg)
       ;; If BEG or POS is inside a comment or string, retreat to
       ;; its opener.  This handles the case where paragraph bounds
@@ -964,46 +1137,46 @@ Returns nil when no syntax boundaries are found."
         ;; Skip blank-space between regions.
         (skip-chars-forward " \t\n" end)
         (when (< (point) end)
-          (let ((region-line-beg (pos-bol))
-                (opener-pos (point)))
+          (let ((job (fancy-fill-paragraph--syntax-fill-job-at (point) nil (cons beg end))))
             (cond
-             ;; Try advancing over a comment.
-             ((forward-comment 1)
-              (cond
-               ;; Block comment.
-               ((fancy-fill-paragraph--syntax-comment-end-p)
-                (push (list
-                       region-line-beg
-                       (pos-eol)
-                       #'fancy-fill-paragraph--fill-block-comment-region
-                       opener-pos)
-                      regions))
-               ;; Line comment - find the full block and skip past it.
-               (t
-                (let ((bounds (fancy-fill-paragraph--line-comment-bounds opener-pos beg end)))
-                  (push (list
-                         (car bounds)
-                         (cdr bounds)
-                         #'fancy-fill-paragraph--fill-line-comment-region)
-                        regions)
-                  (goto-char (1+ (cdr bounds)))))))
-             ;; Not a comment; check for a string delimiter.
-             ((fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after (point)))
-              (condition-case nil
-                  (progn
-                    (forward-sexp 1)
-                    (push (list
-                           region-line-beg
-                           (pos-eol)
-                           #'fancy-fill-paragraph--fill-string-region
-                           opener-pos)
-                          regions))
-                (scan-error
-                 (goto-char end))))
+             (job
+              (push job jobs)
+              (goto-char (fancy-fill-paragraph--syntax-fill-job-resume job)))
              (t
               ;; Neither comment nor string, stop scanning.
               (goto-char end))))))
-      (nreverse regions))))
+      (nreverse jobs))))
+
+(defun fancy-fill-paragraph--syntax-fill-jobs-for-selection (beg end)
+  "Return syntax fill jobs for active selection BEG..END, or nil.
+Only selections contained by one syntax region, or spanning line
+comments at the same indentation, are handled here."
+  (declare (important-return-value t))
+  (cond
+   (fancy-fill-paragraph-syntax-bounds
+    (save-excursion
+      (syntax-propertize end)
+      (let* ((beg-syn (fancy-fill-paragraph--comment-or-string-start-at beg))
+             (end-syn (fancy-fill-paragraph--comment-or-string-start-at end))
+             (syn-start (and beg-syn end-syn (= beg-syn end-syn) beg-syn)))
+        (cond
+         (syn-start
+          (let ((job (fancy-fill-paragraph--syntax-fill-job-at syn-start (cons beg end))))
+            (and job (list job))))
+         ;; Selection spans multiple line comments at the same indent:
+         ;; beg-syn and end-syn differ but both are line comments.
+         ((and beg-syn
+               end-syn
+               (fancy-fill-paragraph--line-comment-syntax-start-p beg-syn)
+               (fancy-fill-paragraph--line-comment-syntax-start-p end-syn)
+               (= (fancy-fill-paragraph--line-comment-indent-col beg-syn)
+                  (fancy-fill-paragraph--line-comment-indent-col end-syn)))
+          (let ((job (fancy-fill-paragraph--syntax-fill-job-at beg-syn (cons beg end))))
+            (and job (list job))))
+         (t
+          nil)))))
+   (t
+    nil)))
 
 (defun fancy-fill-paragraph--block-comment-continuation-suffix (comment-start-pos)
   "Return the synthesized continuation suffix for a block comment.
@@ -2101,65 +2274,10 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
         (point-at-beg (< (point) (mark)))
         (changed nil))
     (save-excursion
-      ;; When the selection is entirely inside a single comment or string,
-      ;; use syntax-aware filling so prefixes (e.g. ` * ') are handled.
-      (syntax-propertize end)
-      (let* ((beg-syn (fancy-fill-paragraph--comment-or-string-start-at beg))
-             (end-syn (fancy-fill-paragraph--comment-or-string-start-at end))
-             (syn-start
-              (and fancy-fill-paragraph-syntax-bounds
-                   beg-syn
-                   end-syn
-                   (= beg-syn end-syn)
-                   beg-syn)))
+      (let ((jobs (fancy-fill-paragraph--syntax-fill-jobs-for-selection beg end)))
         (cond
-         (syn-start
-          (goto-char syn-start)
-          (let ((region-beg (pos-bol)))
-            (cond
-             ;; Block comment: advance past closer via forward-comment.
-             ;; Check `--syntax-comment-end-p' to exclude line comments
-             ;; (whose closer is a newline, not a block-comment ender).
-             ((and (forward-comment 1) (fancy-fill-paragraph--syntax-comment-end-p))
-              (setq changed
-                    (fancy-fill-paragraph--fill-block-comment-region region-beg (pos-eol) syn-start
-                                                                     beg
-                                                                     end)))
-             ;; Line comment: find the full block and fill the selection.
-             ((progn
-                (goto-char syn-start)
-                (and (forward-comment 1) (not (fancy-fill-paragraph--syntax-comment-end-p))))
-              (let ((bounds
-                     (fancy-fill-paragraph--line-comment-bounds
-                      syn-start (point-min) (point-max))))
-                (setq changed
-                      (fancy-fill-paragraph--fill-line-comment-region (car bounds) (cdr bounds)
-                                                                      beg
-                                                                      end))))
-             ;; String: advance past closer via forward-sexp.
-             ((progn
-                (goto-char syn-start)
-                (fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after (point))))
-              (forward-sexp 1)
-              (setq changed
-                    (fancy-fill-paragraph--fill-string-region region-beg (pos-eol) syn-start
-                                                              beg
-                                                              end))))))
-         ;; Selection spans multiple line comments at the same indent:
-         ;; beg-syn and end-syn differ but both are line comments.
-         ((and fancy-fill-paragraph-syntax-bounds
-               beg-syn end-syn
-               (save-excursion
-                 (goto-char beg-syn)
-                 (and (forward-comment 1) (not (fancy-fill-paragraph--syntax-comment-end-p))))
-               (= (fancy-fill-paragraph--line-comment-indent-col beg-syn)
-                  (fancy-fill-paragraph--line-comment-indent-col end-syn)))
-          (let ((bounds
-                 (fancy-fill-paragraph--line-comment-bounds beg-syn (point-min) (point-max))))
-            (setq changed
-                  (fancy-fill-paragraph--fill-line-comment-region (car bounds) (cdr bounds)
-                                                                  beg
-                                                                  end))))
+         (jobs
+          (setq changed (fancy-fill-paragraph--syntax-fill-jobs-run jobs)))
          (t
           (setq changed
                 (fancy-fill-paragraph--fill-paragraph-bounds
@@ -2183,21 +2301,17 @@ Returns non-nil when the buffer was modified."
   (let* ((bounds (fancy-fill-paragraph--paragraph-bounds))
          (beg (car bounds))
          (end (cdr bounds))
-         (sub-regions
+         (jobs
           (when fancy-fill-paragraph-syntax-bounds
-            (fancy-fill-paragraph--comment-or-string-regions beg end (point)))))
+            (fancy-fill-paragraph--syntax-fill-jobs-in-range beg end (point)))))
     (cond
-     (sub-regions
+     (jobs
       ;; Fill each region independently, in reverse order so
       ;; earlier positions remain valid after later fills.
       ;; Save point as an integer since `replace-region-contents'
       ;; can displace `save-excursion' markers inside fill functions.
       (let ((saved-point (point))
-            (changed nil))
-        (dolist (region (reverse sub-regions))
-          (pcase-let ((`(,rbeg ,rend ,fill-fn . ,extra) region))
-            (when (apply fill-fn rbeg rend extra)
-              (setq changed t))))
+            (changed (fancy-fill-paragraph--syntax-fill-jobs-run jobs t)))
         (goto-char saved-point)
         changed))
      (t
