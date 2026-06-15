@@ -404,22 +404,17 @@ neither bit.  SYN-MAIN may be nil, in which case nil is returned."
   "Return a delimiter match-point function for TYPE and PATTERNS."
   (declare (important-return-value t))
   (lambda (text pos)
-    (let ((matches
-           (mapcar
-            (lambda (pattern)
-              (let ((match (string-search pattern text pos)))
-                (when match
-                  (cond
-                   ((eq type 'close)
-                    (+ match (1- (length pattern))))
-                   (t
-                    match)))))
-            patterns)))
-      (cond
-       ((= (length matches) 1)
-        (car matches))
-       (t
-        (fancy-fill-paragraph--earliest-match (car matches) (cadr matches)))))))
+    (let ((earliest nil))
+      (dolist (pattern patterns earliest)
+        (let ((match (string-search pattern text pos)))
+          (when match
+            (let ((point
+                   (cond
+                    ((eq type 'close)
+                     (+ match (1- (length pattern))))
+                    (t
+                     match))))
+              (setq earliest (fancy-fill-paragraph--earliest-match earliest point)))))))))
 
 (defun fancy-fill-paragraph--make-delimiter (key type join weight &rest patterns)
   "Return one delimiter entry.

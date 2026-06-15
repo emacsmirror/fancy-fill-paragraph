@@ -389,6 +389,11 @@ line (with its code) must be untouched."
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
 
+(ert-deftest split-delimiter-match-point-uses-all-patterns ()
+  "Delimiter matching returns the earliest match across all patterns."
+  (let ((match-point (fancy-fill-paragraph--make-delimiter-match-point 'close '(" z" " y" " x"))))
+    (should (= 2 (funcall match-point "a x b y c z" 0)))))
+
 (ert-deftest split-single-sentence ()
   "Single sentence with no split point stays as one item."
   (let ((text-initial "Hello world.")
