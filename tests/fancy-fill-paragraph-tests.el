@@ -78,20 +78,19 @@ see `advice-add' documentation."
   "Run BODY and signal when repeated `forward-line' calls stop advancing."
   (declare (indent 0))
   `(let ((forward-line-stall-count 0))
-     (with-advice
-         (('forward-line
-           :around
-           (lambda (forward-line-original &optional arg)
-             (let ((before (point))
-                   (step (or arg 1)))
-               (prog1 (funcall forward-line-original arg)
-                 (cond
-                  ((and (> step 0) (= (point) before))
-                   (setq forward-line-stall-count (1+ forward-line-stall-count))
-                   (when (> forward-line-stall-count 1)
-                     (error "forward-line stopped advancing repeatedly")))
-                  (t
-                   (setq forward-line-stall-count 0))))))))
+     (with-advice (('forward-line
+                    :around
+                    (lambda (forward-line-original &optional arg)
+                      (let ((before (point))
+                            (step (or arg 1)))
+                        (prog1 (funcall forward-line-original arg)
+                          (cond
+                           ((and (> step 0) (= (point) before))
+                            (setq forward-line-stall-count (1+ forward-line-stall-count))
+                            (when (> forward-line-stall-count 1)
+                              (error "forward-line stopped advancing repeatedly")))
+                           (t
+                            (setq forward-line-stall-count 0))))))))
        ,@body)))
 
 (defun test-split-items (text)
@@ -389,6 +388,11 @@ line (with its code) must be untouched."
 
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
+
+(ert-deftest split-delimiter-match-point-uses-all-patterns ()
+  "Delimiter matching returns the earliest match across all patterns."
+  (let ((match-point (fancy-fill-paragraph--make-delimiter-match-point 'close '(" z" " y" " x"))))
+    (should (= 2 (funcall match-point "a x b y c z" 0)))))
 
 (ert-deftest split-single-sentence ()
   "Single sentence with no split point stays as one item."
