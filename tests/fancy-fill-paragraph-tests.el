@@ -2214,6 +2214,18 @@ line (with its code) must be untouched."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-column-target-float-clamps-to-effective-fill-column ()
+  "Float fill-column-target above 1.0 clamps to the effective fill column."
+  (let ((break-weights [75 75 75])
+        (seps [" " " " " "])
+        (sep-lens [1 1 1])
+        (fancy-fill-paragraph-fill-column-target 2.0))
+    (should
+     (equal
+      '("xxx" "xxx" "xxx" "xxx")
+      (fancy-fill-paragraph--solve
+       '("xxx" "xxx" "xxx" "xxx") 10 break-weights seps sep-lens 50)))))
+
 (ert-deftest fill-column-target-positive ()
   "Positive integer fill-column-target is used directly as the target."
   (let ((text-initial "Red orange. Yellow green. Blue indigo. Violet white.")
