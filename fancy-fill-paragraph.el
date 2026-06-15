@@ -56,7 +56,7 @@ The effective fill column is at least 1."
 (defcustom fancy-fill-paragraph-fill-column-target 0
   "Target column for the solver, allowing lines to extend up to `fill-column'.
 When zero, the target equals `fill-column'.
-When a float (0.1 to 1.0), a fraction of the effective fill column.
+When a float, a fraction of the effective fill column, clamped to that column.
 When a negative integer, subtracted from the effective fill column.
 When a positive integer, used directly, clamped to the effective fill column.
 The solver minimizes raggedness around this target while still allowing
@@ -1840,7 +1840,7 @@ Uses dynamic programming to minimize raggedness."
           (let ((target fancy-fill-paragraph-fill-column-target))
             (cond
              ((floatp target)
-              (max 1 (round (* target local-fill-column))))
+              (min local-fill-column (max 1 (round (* target local-fill-column)))))
              ((< target 0)
               (max 1 (+ local-fill-column target)))
              ((> target 0)
