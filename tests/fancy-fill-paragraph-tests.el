@@ -3310,6 +3310,33 @@ paragraph's lines and gap are untouched."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-comments-ignore-hash-in-string ()
+  "Line-comment block expansion must ignore a same-column hash inside a string."
+  (let ((fill-column 45)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "s = \"\"\"abc\n"
+          "# not a comment line that should stay in the string\"\"\"\n"
+          "# real comment alpha beta gamma delta\n"
+          "# epsilon zeta eta theta iota\n"))
+        (text-expected
+         (concat
+          "s = \"\"\"abc\n"
+          "# not a comment line that should stay in the string\"\"\"\n"
+          "# real comment alpha beta gamma delta epsilon\n"
+          "# zeta eta theta iota\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "real comment")
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-python-comments-tab-aligned-unwrap ()
   "Tab and space indented comments at the same visual column should join."
   (let ((fill-column 70)

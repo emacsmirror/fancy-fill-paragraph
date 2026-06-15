@@ -850,10 +850,13 @@ by column and would delete or distort a mismatched delimiter."
     ;; at a different indentation and must not join the block.
     (and (= (move-to-column indent-col) indent-col)
          (fancy-fill-paragraph--line-comment-opener-at-point-p)
-         (let ((delim-end (fancy-fill-paragraph--line-comment-delimiter-end (point))))
+         (let ((comment-pos (point))
+               (delim-end (fancy-fill-paragraph--line-comment-delimiter-end (point))))
            (and delim-end
-                (equal delim-str (buffer-substring-no-properties (point) delim-end))
-                (point))))))
+                (equal delim-str (buffer-substring-no-properties comment-pos delim-end))
+                (let ((ppss (syntax-ppss delim-end)))
+                  (and (nth 4 ppss) (= (fancy-fill-paragraph--ppss-start ppss) comment-pos)))
+                comment-pos)))))
 
 (defun fancy-fill-paragraph--line-comment-at-col-p (indent-col delim-str)
   "Return non-nil when the current line has a line comment at INDENT-COL.
