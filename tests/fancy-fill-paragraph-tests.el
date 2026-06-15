@@ -266,6 +266,23 @@ inside the string."
         (fancy-fill-paragraph)
         (should (equal text (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-unterminated-string-region-no-scan-error ()
+  "Active region in an unterminated string must not signal `scan-error'."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (text-expected "x = \"unterminated\nwords words words\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text "x = \"unterminated words words words\n")
+        (syntax-propertize (point-max))
+        (goto-char (point-min))
+        (search-forward "unterminated")
+        (set-mark (line-end-position))
+        (activate-mark)
+        (fancy-fill-paragraph)
+        (should (equal text-expected (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-c-comment-trailing-code-region-no-error ()
   "Active region inside \"/* ... */ code;\" must not signal or modify code.
 The region path dispatches through the same inline fill as the
