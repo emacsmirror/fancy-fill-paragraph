@@ -312,14 +312,6 @@ Return non-nil when any paragraph was modified."
 ;; ---------------------------------------------------------------------------
 ;; Private Helpers (Syntax)
 
-(defsubst fancy-fill-paragraph--ppss-start (ppss)
-  "Return the start position of the innermost string or comment from PPSS.
-Extracts element 8 of the `syntax-ppss' result, which holds the
-character position of the start of the enclosing string or comment,
-or nil when outside both."
-  (declare (important-return-value t))
-  (nth 8 ppss))
-
 (defun fancy-fill-paragraph--comment-or-string-start-at (pos)
   "Return the comment or string start position for POS, or nil.
 Probes `syntax-ppss' at POS and, when that yields nothing, at
@@ -327,10 +319,10 @@ POS+1 so that a cursor directly on a comment-start character
 \(e.g. `#') or string delimiter is still detected."
   (declare (important-return-value t))
   (save-excursion
-    (or (fancy-fill-paragraph--ppss-start (syntax-ppss pos))
+    (or (ppss-comment-or-string-start (syntax-ppss pos))
         (cond
          ((< pos (point-max))
-          (let ((beg (fancy-fill-paragraph--ppss-start (syntax-ppss (1+ pos)))))
+          (let ((beg (ppss-comment-or-string-start (syntax-ppss (1+ pos)))))
             (and beg (<= beg pos) beg)))
          (t
           nil)))))
@@ -855,7 +847,8 @@ by column and would delete or distort a mismatched delimiter."
            (and delim-end
                 (equal delim-str (buffer-substring-no-properties comment-pos delim-end))
                 (let ((ppss (syntax-ppss delim-end)))
-                  (and (nth 4 ppss) (= (fancy-fill-paragraph--ppss-start ppss) comment-pos)))
+                  (and (ppss-comment-depth ppss)
+                       (= (ppss-comment-or-string-start ppss) comment-pos)))
                 comment-pos)))))
 
 (defun fancy-fill-paragraph--line-comment-at-col-p (indent-col delim-str)
@@ -1481,7 +1474,7 @@ when non-nil, is excluded from the returned content."
 OPENER-COL is the column where content begins after the opener delimiter."
   (unless (eq
            comment-start-pos
-           (fancy-fill-paragraph--ppss-start (save-excursion (syntax-ppss (1- end)))))
+           (ppss-comment-or-string-start (save-excursion (syntax-ppss (1- end)))))
     (error "Expected comment at %d" comment-start-pos))
   (let* ((prefix-col
           (max (fancy-fill-paragraph--prefix-column-width beg cont-prefix) (length cont-prefix)))
