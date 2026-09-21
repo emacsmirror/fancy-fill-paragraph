@@ -101,10 +101,10 @@ Set to nil to disable dot-point detection entirely."
 In programming modes this treats each comment or string as a separate
 paragraph, preventing `fancy-fill-paragraph' from merging text across
 distinct comments or strings.
-Filling a paragraph at point that holds code beside a comment or
-string leaves it alone rather than reflowing it as prose, which would
-merge the code into the comment text.  This reports no changes, the
-same as an already filled paragraph."
+Filling a paragraph that holds code beside a comment or string leaves
+it alone rather than reflowing it as prose, which would merge the code
+into the comment text.  This reports no changes, the same as an
+already filled paragraph."
   :type 'boolean)
 
 
@@ -1170,39 +1170,44 @@ positions remain valid."
   "Return syntax fill jobs for comment or string regions in BEG..END.
 POS is the cursor position, used to detect when point is inside a
 comment or string whose opener precedes BEG.
-Returns nil when no syntax boundaries are found."
+Returns nil when no syntax boundaries are found, and when
+`fancy-fill-paragraph-syntax-bounds' is nil."
   (declare (important-return-value t))
-  (save-excursion
-    ;; Ensure syntax properties are set for the entire region.
-    ;; Modes like `python-mode' rely on `syntax-propertize-function'
-    ;; to mark triple-quoted strings.
-    (syntax-propertize end)
-    (let ((jobs nil))
-      (goto-char beg)
-      ;; If BEG or POS is inside a comment or string, retreat to
-      ;; its opener.  This handles the case where paragraph bounds
-      ;; extend beyond the syntax region (e.g. code surrounds the
-      ;; comment).  POS is probed at the last non-blank character of
-      ;; its line, so the column never changes the result.
-      (let ((syn-start
-             (or (fancy-fill-paragraph--comment-or-string-start-at beg)
-                 (fancy-fill-paragraph--comment-or-string-start-at
-                  (fancy-fill-paragraph--line-last-non-blank pos)))))
-        (when syn-start
-          (goto-char syn-start)))
-      (while (< (point) end)
-        ;; Skip blank-space between regions.
-        (skip-chars-forward " \t\n" end)
-        (when (< (point) end)
-          (let ((job (fancy-fill-paragraph--syntax-fill-job-at (point) nil (cons beg end))))
-            (cond
-             (job
-              (push job jobs)
-              (goto-char (fancy-fill-paragraph--syntax-fill-job-resume job)))
-             (t
-              ;; Neither comment nor string, stop scanning.
-              (goto-char end))))))
-      (nreverse jobs))))
+  (cond
+   (fancy-fill-paragraph-syntax-bounds
+    (save-excursion
+      ;; Ensure syntax properties are set for the entire region.
+      ;; Modes like `python-mode' rely on `syntax-propertize-function'
+      ;; to mark triple-quoted strings.
+      (syntax-propertize end)
+      (let ((jobs nil))
+        (goto-char beg)
+        ;; If BEG or POS is inside a comment or string, retreat to
+        ;; its opener.  This handles the case where paragraph bounds
+        ;; extend beyond the syntax region (e.g. code surrounds the
+        ;; comment).  POS is probed at the last non-blank character of
+        ;; its line, so the column never changes the result.
+        (let ((syn-start
+               (or (fancy-fill-paragraph--comment-or-string-start-at beg)
+                   (fancy-fill-paragraph--comment-or-string-start-at
+                    (fancy-fill-paragraph--line-last-non-blank pos)))))
+          (when syn-start
+            (goto-char syn-start)))
+        (while (< (point) end)
+          ;; Skip blank-space between regions.
+          (skip-chars-forward " \t\n" end)
+          (when (< (point) end)
+            (let ((job (fancy-fill-paragraph--syntax-fill-job-at (point) nil (cons beg end))))
+              (cond
+               (job
+                (push job jobs)
+                (goto-char (fancy-fill-paragraph--syntax-fill-job-resume job)))
+               (t
+                ;; Neither comment nor string, stop scanning.
+                (goto-char end))))))
+        (nreverse jobs))))
+   (t
+    nil)))
 
 (defun fancy-fill-paragraph--syntax-region-at (syn-start)
   "Return the region opening at SYN-START as a (KIND . RESUME) cons.
@@ -1292,10 +1297,22 @@ the range is safe and where the check does not apply."
        (derived-mode-p 'prog-mode)
        (fancy-fill-paragraph--range-code-beside-comment-or-string-p beg end)))
 
+(defun fancy-fill-paragraph--drop-refused-paragraphs (bounds)
+  "Return BOUNDS without the paragraphs a prose fill is refused for.
+See `fancy-fill-paragraph--fill-region-refuse-p' for what is refused.
+Ordering is preserved, so callers still fill later paragraphs first."
+  (declare (important-return-value t))
+  (let ((result nil))
+    (dolist (para-bounds bounds)
+      (unless (fancy-fill-paragraph--fill-region-refuse-p (car para-bounds) (cdr para-bounds))
+        (push para-bounds result)))
+    (nreverse result)))
+
 (defun fancy-fill-paragraph--syntax-fill-jobs-for-selection (beg end)
   "Return syntax fill jobs for active selection BEG..END, or nil.
 Only selections contained by one syntax region, or spanning line
-comments at the same indentation, are handled here."
+comments at the same indentation, are handled here.
+Returns nil when `fancy-fill-paragraph-syntax-bounds' is nil."
   (declare (important-return-value t))
   (cond
    (fancy-fill-paragraph-syntax-bounds
@@ -2432,9 +2449,12 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
          (jobs
           (setq changed (fancy-fill-paragraph--syntax-fill-jobs-run jobs)))
          (t
+          ;; Paragraphs holding code beside a comment are left alone, the
+          ;; same refusal the cursor path makes.
           (setq changed
                 (fancy-fill-paragraph--fill-paragraph-bounds
-                 (fancy-fill-paragraph--collect-paragraph-bounds beg end t)))))))
+                 (fancy-fill-paragraph--drop-refused-paragraphs
+                  (fancy-fill-paragraph--collect-paragraph-bounds beg end t))))))))
     ;; Restore mark/point in original direction, deactivate mark.
     (let ((end-adjusted (+ end (- (buffer-size) buf-size))))
       (cond
@@ -2454,9 +2474,7 @@ Returns non-nil when the buffer was modified."
   (let* ((bounds (fancy-fill-paragraph--paragraph-bounds))
          (beg (car bounds))
          (end (cdr bounds))
-         (jobs
-          (when fancy-fill-paragraph-syntax-bounds
-            (fancy-fill-paragraph--syntax-fill-jobs-in-range beg end (point)))))
+         (jobs (fancy-fill-paragraph--syntax-fill-jobs-in-range beg end (point))))
     (cond
      (jobs
       ;; Fill each region independently, in reverse order so

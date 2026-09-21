@@ -787,6 +787,53 @@ cutting the prefix width from it deletes the text."
         (should-fill-same-from-every-position text-initial 0 text-expected)
         (should-fill-same-from-every-position text-initial 1 text-expected)))))
 
+(ert-deftest fill-syntax-bounds-region-code-beside-comment-untouched ()
+  "A selection holding code beside a comment must not be reflowed.
+The cursor path already refuses this, a selection must refuse it too."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text "int x = 1;\n// aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk.\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char (point-min))
+        (set-mark (point))
+        (goto-char (point-max))
+        (activate-mark)
+        (should-not (fancy-fill-paragraph))
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-region-refuses-only-the-mixed-paragraph ()
+  "Refusal is per paragraph, the rest of the selection still fills."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "// aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll.\n"
+          "\n"
+          "int x = 1;\n"
+          "// mmm nnn ooo ppp qqq rrr sss ttt uuu vvv.\n"))
+        (text-expected
+         (concat
+          "// aaa bbb ccc ddd eee fff ggg hhh iii\n"
+          "// jjj kkk lll.\n"
+          "\n"
+          "int x = 1;\n"
+          "// mmm nnn ooo ppp qqq rrr sss ttt uuu vvv.\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (set-mark (point))
+        (goto-char (point-max))
+        (activate-mark)
+        (should (fancy-fill-paragraph))
+        (should (equal text-expected (buffer-string)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
 
@@ -1423,6 +1470,41 @@ body line already reaches past it."
       (let ((inhibit-message t))
         (buffer-reset-text text-initial)
         (goto-char (point-min))
+        (should (fancy-fill-paragraph))
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-option-off-cursor-path-plain-fill ()
+  "With `fancy-fill-paragraph-syntax-bounds' nil the cursor path fills as prose.
+No continuation prefix is synthesized, the comment is treated as text."
+  (let ((fancy-fill-paragraph-syntax-bounds nil)
+        (fill-column 25)
+        (sentence-end-double-space nil)
+        (text-initial "/* aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk */\n")
+        (text-expected (concat "/* aaa bbb ccc ddd eee\n" "fff ggg hhh iii jjj kkk\n" "*/\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (should (fancy-fill-paragraph))
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-option-off-selection-path-plain-fill ()
+  "With `fancy-fill-paragraph-syntax-bounds' nil a selection fills as prose.
+The selection path is gated by the option just as the cursor path is.
+Both ends sit inside the comment, a selection the path only recognizes
+as one syntax region while the option is on."
+  (let ((fancy-fill-paragraph-syntax-bounds nil)
+        (fill-column 25)
+        (sentence-end-double-space nil)
+        (text-initial "/* aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk */\n")
+        (text-expected (concat "/* aaa bbb ccc ddd eee\n" "fff ggg hhh iii jjj kkk\n" "*/\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char 4)
+        (push-mark 44 t t)
         (should (fancy-fill-paragraph))
         (should (equal text-expected (buffer-string)))))))
 

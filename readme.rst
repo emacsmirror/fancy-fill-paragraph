@@ -152,10 +152,10 @@ Customization
    In programming modes this treats each comment or string as a separate
    paragraph, preventing ``fancy-fill-paragraph`` from merging text across
    distinct comments or strings.
-   Filling a paragraph at point that holds code beside a comment or
-   string leaves it alone rather than reflowing it as prose, which would
-   merge the code into the comment text.  This reports no changes, the
-   same as an already filled paragraph.
+   Filling a paragraph that holds code beside a comment or string leaves
+   it alone rather than reflowing it as prose, which would merge the code
+   into the comment text.  This reports no changes, the same as an
+   already filled paragraph.
 
 .. END VARIABLES
 
