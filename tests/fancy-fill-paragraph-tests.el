@@ -35,6 +35,23 @@
        (buffer-reset-text ,initial-buffer-text)
        ,@body)))
 
+(defun should-fill-same-from-every-position (text-initial line-index text-expected)
+  "Fill TEXT-INITIAL from every position on LINE-INDEX, expecting TEXT-EXPECTED.
+Filling behaves as if the cursor were at the last non-blank character
+of its line, so where point sits on it must never change the result.
+Positions are stepped rather than columns, so a tab counts once.
+Call inside a buffer whose major mode is already set."
+  (buffer-reset-text text-initial)
+  (goto-char (point-min))
+  (forward-line line-index)
+  (let ((line-beg (point))
+        (line-end (pos-eol)))
+    (dotimes (offset (1+ (- line-end line-beg)))
+      (buffer-reset-text text-initial)
+      (goto-char (+ line-beg offset))
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
 (defmacro with-advice (advice &rest body)
   "Execute BODY with ADVICE temporarily enabled.
 
@@ -320,6 +337,58 @@ line (with its code) must be untouched."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-code-line-beside-comment-untouched ()
+  "A code line in a paragraph holding a comment must never be reflowed.
+Falling back to a plain fill merged the code into the comment text."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 50)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "int main(void) {\n"
+          "  int x = 1;\n"
+          "  // A fairly long comment line that will need wrapping.\n"
+          "  return x;\n"
+          "}\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        ;; Lines 0, 1, 3 and 4 are code, they are left alone.
+        (dolist (line-index (list 0 1 3 4))
+          (should-fill-same-from-every-position text-initial line-index text-initial))))))
+
+(ert-deftest fill-plain-code-paragraph-still-fills ()
+  "A paragraph with no comment or string still falls back to a plain fill.
+The comment guard must not disable filling for code-only text."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n")
+        (text-expected "aaa bbb ccc ddd eee fff ggg\nhhh iii jjj kkk\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)))))
+
+(ert-deftest fill-quoted-prose-outside-prog-mode-still-fills ()
+  "Quoted prose outside a programming mode still fills.
+Double quotes are string delimiters in the standard syntax table
+and `org-mode' also sets `comment-start', so the guard against
+filling code beside a string must not reach prose modes."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial "aaa \"bbb ccc\" ddd eee fff ggg hhh iii jjj\n")
+        (text-expected "aaa \"bbb ccc\"\nddd eee fff ggg hhh iii jjj\n"))
+    (dolist (mode (list #'text-mode #'org-mode #'conf-mode))
+      (with-temp-buffer
+        (funcall mode)
+        (let ((inhibit-message t))
+          (buffer-reset-text text-initial)
+          (goto-char (point-min))
+          (fancy-fill-paragraph)
+          (should (equal text-expected (buffer-string))))))))
+
 (ert-deftest fill-syntax-bounds-python-line-comment-leading-code-untouched ()
   "Code sharing a line before a Python comment must not be reflowed."
   (let ((fancy-fill-paragraph-syntax-bounds t)
@@ -402,6 +471,90 @@ line (with its code) must be untouched."
         (goto-char 8)
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-unterminated-comment-still-fills ()
+  "An unterminated comment is the normal state while typing one.
+The guard against filling code beside a comment must not suppress the
+fill when the range holds no code to merge into it."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial "/* aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp\n")
+        (text-expected
+         (concat "/* aaa bbb ccc ddd eee fff ggg hhh iii\n" "jjj kkk lll mmm nnn ooo ppp\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (should (fancy-fill-paragraph))
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-apostrophe-in-code-still-fills ()
+  "An apostrophe opens a string that never closes, it is not a string.
+Treating it as one stopped code paragraphs holding an apostrophe from
+filling at all."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial "echo it doesn't matter aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n")
+        (text-expected
+         (concat "echo it doesn't matter aaa bbb ccc ddd\n" "eee fff ggg hhh iii jjj kkk lll\n")))
+    (with-temp-buffer
+      (sh-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (should (fancy-fill-paragraph))
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-comment-at-eob-without-newline-fills ()
+  "The last comment of a file without a trailing newline must fill.
+The comment has no closing newline, which must not read as code beside
+it."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial "// aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk")
+        (text-expected (concat "// aaa bbb ccc ddd eee fff ggg hhh iii\n" "// jjj kkk")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (should (fancy-fill-paragraph))
+        (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-code-beside-comment-at-eob-untouched ()
+  "Code beside a comment running to end-of-buffer must not be reflowed.
+Same shape as a comment filling the whole paragraph, only the code
+before it separates the two cases."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text "int x = 1;\n// aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk."))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char (point-min))
+        (should-not (fancy-fill-paragraph))
+        (should (equal text (buffer-string)))))))
+
+(ert-deftest fill-syntax-bounds-code-beside-string-untouched ()
+  "Code beside a terminated string must not be reflowed.
+Filling as prose splits the literal across a newline."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text "int x = 1;\nchar *s = \"aaa bbb ccc ddd eee fff ggg hhh\";\n"))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text)
+        (goto-char (point-min))
+        (should-not (fancy-fill-paragraph))
+        (should (equal text (buffer-string)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
@@ -911,11 +1064,77 @@ line (with its code) must be untouched."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest range-has-non-blank-p-empty-and-reversed-ranges ()
+  "An empty or reversed range holds nothing, whatever lies between.
+The code-beside-comment scan relies on this, an opener preceding the
+scan position reverses the range it checks for code."
+  (with-fancy-fill-paragraph-test "aaa   bbb\n"
+    (should (fancy-fill-paragraph--range-has-non-blank-p (point-min) (point-max)))
+    ;; Blank-space only.
+    (should-not (fancy-fill-paragraph--range-has-non-blank-p 4 7))
+    ;; Empty.
+    (should-not (fancy-fill-paragraph--range-has-non-blank-p 5 5))
+    ;; Reversed, every character of the buffer lies between the two.
+    (should-not (fancy-fill-paragraph--range-has-non-blank-p 9 2))))
+
 (ert-deftest strip-region-lines-end-past-point-max-does-not-stall ()
   "A stale END past `point-max' must not make line stripping loop forever."
   (with-fancy-fill-paragraph-test "aaa  bbb\n"
     (with-forward-line-stall-guard
       (should (equal '("aaa  bbb") (fancy-fill-paragraph--strip-region-lines 1 12 0))))))
+
+(ert-deftest syntax-region-at-closed-regions ()
+  "A closed comment or string reports its kind and the position after its closer."
+  (with-temp-buffer
+    (c-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "/* closed */ tail")
+      (syntax-propertize (point-max))
+      (should (equal '(comment . 13) (fancy-fill-paragraph--syntax-region-at 1)))
+      (buffer-reset-text "\"a string\"; x")
+      (syntax-propertize (point-max))
+      (should (equal '(string . 11) (fancy-fill-paragraph--syntax-region-at 1)))
+      (buffer-reset-text "// line\nx;")
+      (syntax-propertize (point-max))
+      (should (equal '(comment . 9) (fancy-fill-paragraph--syntax-region-at 1))))))
+
+(ert-deftest syntax-region-at-unclosed-regions ()
+  "A region that never closes reports its kind with no resume position.
+An apostrophe in shell text opens a string that runs to the end of the
+buffer, a quoted word beside it still closes.  The kind is what tells
+an unclosed comment from an unclosed string."
+  (with-temp-buffer
+    (c-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "/* never closed")
+      (syntax-propertize (point-max))
+      (should (equal '(comment) (fancy-fill-paragraph--syntax-region-at 1)))))
+  (with-temp-buffer
+    (sh-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "echo don't")
+      (syntax-propertize (point-max))
+      (should (equal '(string) (fancy-fill-paragraph--syntax-region-at 9)))
+      (buffer-reset-text "echo 'closed' x")
+      (syntax-propertize (point-max))
+      (should (equal '(string . 14) (fancy-fill-paragraph--syntax-region-at 6))))))
+
+(ert-deftest fill-syntax-bounds-option-off-code-beside-comment-fills ()
+  "With `fancy-fill-paragraph-syntax-bounds' nil, code beside a comment fills.
+The refusal is part of the syntax handling, turning it off restores the
+plain prose fill even where that merges the code into the comment."
+  (let ((fancy-fill-paragraph-syntax-bounds nil)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial (concat "int x = 1;\n" "// aaa bbb ccc ddd eee fff ggg hhh iii jjj.\n"))
+        (text-expected (concat "int x = 1; // aaa bbb ccc ddd eee fff\n" "ggg hhh iii jjj.\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (should (fancy-fill-paragraph))
+        (should (equal text-expected (buffer-string)))))))
 
 (ert-deftest fill-region-end-past-point-max-does-not-stall ()
   "A stale END past `point-max' must not make filling loop forever."
