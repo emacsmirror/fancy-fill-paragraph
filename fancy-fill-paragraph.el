@@ -328,6 +328,22 @@ Return non-nil when any paragraph was modified."
 ;; ---------------------------------------------------------------------------
 ;; Private Helpers (Syntax)
 
+(defun fancy-fill-paragraph--line-last-non-blank (pos)
+  "Return the position of the last non-blank character on POS's line.
+Returns POS when the line is blank, there is no such character and POS
+already sits on the line, so it probes the same syntax region."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char pos)
+    (let ((line-beg (pos-bol)))
+      (goto-char (pos-eol))
+      (skip-chars-backward " \t" line-beg)
+      (cond
+       ((< line-beg (point))
+        (1- (point)))
+       (t
+        pos)))))
+
 (defun fancy-fill-paragraph--comment-or-string-start-at (pos)
   "Return the comment or string start position for POS, or nil.
 Probes `syntax-ppss' at POS and, when that yields nothing, at
@@ -1134,10 +1150,12 @@ Returns nil when no syntax boundaries are found."
       ;; If BEG or POS is inside a comment or string, retreat to
       ;; its opener.  This handles the case where paragraph bounds
       ;; extend beyond the syntax region (e.g. code surrounds the
-      ;; comment).
+      ;; comment).  POS is probed at the last non-blank character of
+      ;; its line, so the column never changes the result.
       (let ((syn-start
-             (or (fancy-fill-paragraph--comment-or-string-start-at (point))
-                 (fancy-fill-paragraph--comment-or-string-start-at pos))))
+             (or (fancy-fill-paragraph--comment-or-string-start-at beg)
+                 (fancy-fill-paragraph--comment-or-string-start-at
+                  (fancy-fill-paragraph--line-last-non-blank pos)))))
         (when syn-start
           (goto-char syn-start)))
       (while (< (point) end)

@@ -337,6 +337,97 @@ line (with its code) must be untouched."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-cursor-column-comment-line-elisp ()
+  "Any column of a comment line fills the comment, indentation included.
+Leading blank-space is outside the syntax region, so probing it
+reported code and the preceding code line was reflowed as prose."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "  (code-before)\n" "  ;; aaa bbb ccc ddd eee fff ggg hhh iii jjj.\n" "  ;; kkk lll.\n"))
+        (text-expected
+         (concat
+          "  (code-before)\n"
+          "  ;; aaa bbb ccc ddd eee fff ggg hhh iii\n"
+          "  ;; jjj. kkk lll.\n")))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        (should-fill-same-from-every-position text-initial 2 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-cursor-column-comment-line-python ()
+  "Any column of a Python comment line fills the comment."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat "def f():\n" "    x = 1\n" "    # aaa bbb ccc ddd eee fff ggg hhh iii jjj.\n"))
+        (text-expected
+         (concat
+          "def f():\n"
+          "    x = 1\n"
+          "    # aaa bbb ccc ddd eee fff ggg hhh\n"
+          "    # iii jjj.\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 2 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-cursor-column-two-char-comment-opener ()
+  "Any column of a \"//\" comment line fills the comment.
+Probing only one character ahead lands on the second \"/\", which
+`syntax-ppss' still reports as code, so the comment was missed."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "  code_before();\n"
+          "  // aaa bbb ccc ddd eee fff ggg hhh iii jjj.\n"
+          "  // kkk lll.\n"))
+        (text-expected
+         (concat
+          "  code_before();\n"
+          "  // aaa bbb ccc ddd eee fff ggg hhh iii\n"
+          "  // jjj. kkk lll.\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        (should-fill-same-from-every-position text-initial 2 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-cursor-column-block-comment-opener ()
+  "Any column of a \"/* ... */\" line fills the comment."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial (concat "code_before();\n" "/* aaa bbb ccc ddd eee fff ggg hhh. */\n"))
+        (text-expected
+         (concat "code_before();\n" "/* aaa bbb ccc ddd eee fff ggg\n" " * hhh. */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-cursor-column-trailing-comment ()
+  "Any column of a line ending in a comment fills that comment.
+The cursor is taken to be at the last non-blank character, which
+is comment text even when the line starts with code."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat "x = 1  # aaa bbb ccc ddd eee fff ggg hhh iii jjj.\n" "       # kkk lll.\n"))
+        (text-expected
+         (concat "x = 1  # aaa bbb ccc ddd eee fff ggg hhh\n" "       # iii jjj. kkk lll.\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)))))
+
 (ert-deftest fill-syntax-bounds-code-line-beside-comment-untouched ()
   "A code line in a paragraph holding a comment must never be reflowed.
 Falling back to a plain fill merged the code into the comment text."
