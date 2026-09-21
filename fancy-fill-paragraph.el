@@ -225,12 +225,21 @@ Either or both may be nil."
 (defun fancy-fill-paragraph--extract-body-indent (pos opener-col)
   "Extract indentation characters from the line at POS up to OPENER-COL.
 Preserves the actual blank-space (tabs or spaces) from the buffer
-rather than synthesizing spaces from the column width."
+rather than synthesizing spaces from the column width.  Code sharing
+the line is not indentation, only its leading blank-space is kept,
+padded with spaces to reach OPENER-COL.  A tab straddling that column
+is kept whole, so the result can be wider."
   (declare (important-return-value t))
   (save-excursion
     (goto-char pos)
-    (move-to-column opener-col)
-    (buffer-substring-no-properties (pos-bol) (point))))
+    (goto-char (pos-bol))
+    (skip-chars-forward " \t" (pos-eol))
+    ;; Never past the indentation, code sharing the line is not indent.
+    (move-to-column (min opener-col (current-column)))
+    (concat
+     (buffer-substring-no-properties (pos-bol) (point))
+     ;; A tab straddling OPENER-COL leaves point past it, nothing to pad.
+     (make-string (max 0 (- opener-col (current-column))) ?\s))))
 
 (defsubst fancy-fill-paragraph--prefix-column-width (pos prefix)
   "Return the column width of PREFIX at buffer position POS."
@@ -1565,6 +1574,14 @@ The plist contains:
            (<= (- (pos-eol) last-bol) prefix-col)
            (buffer-substring-no-properties last-bol (pos-eol))))))
 
+(defsubst fancy-fill-paragraph--block-comment-prefix-p (str)
+  "Return non-nil when STR is blank-space around a run of continuation marks.
+Distinguishes a wrapped line that carries a prefix from one that begins
+with body text.  Only a single run is accepted, body text opening with
+punctuation is kept rather than cut."
+  (declare (important-return-value t))
+  (string-match-p "\\`[ \t]*[^ \t[:alnum:]]*[ \t]*\\'" str))
+
 (defun fancy-fill-paragraph--block-comment-inline-lines
     (beg end opener-col prefix-col last-line-verbatim)
   "Return inline block comment content lines stripped for filling.
@@ -1585,8 +1602,16 @@ when non-nil, is excluded from the returned content."
       (let ((result (list (buffer-substring-no-properties (point) (pos-eol)))))
         (forward-line 1)
         (while (< (point) content-end-bol)
-          (move-to-column prefix-col)
-          (push (buffer-substring-no-properties (point) (pos-eol)) result)
+          (let ((bol (point)))
+            (move-to-column prefix-col)
+            ;; Continuation lines normally carry the prefix, however filling
+            ;; a second time can leave one starting with body text.  Cutting
+            ;; PREFIX-COL columns from that deletes the text, so keep it.
+            (unless (fancy-fill-paragraph--block-comment-prefix-p
+                     (buffer-substring-no-properties bol (point)))
+              (goto-char bol)
+              (skip-chars-forward " \t" (pos-eol)))
+            (push (buffer-substring-no-properties (point) (pos-eol)) result))
           (forward-line 1))
         (nreverse result)))))
 

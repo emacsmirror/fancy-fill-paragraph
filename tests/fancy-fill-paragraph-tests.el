@@ -647,6 +647,85 @@ Filling as prose splits the literal across a newline."
         (should-not (fancy-fill-paragraph))
         (should (equal text (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-code-before-block-comment-prefix-excludes-code ()
+  "Code before a block comment must not become the continuation prefix.
+`fancy-fill-paragraph--extract-body-indent' takes everything up to the
+opener column, so leading code is otherwise repeated on every wrapped
+line.  Blank-space of the same width keeps the `*' aligned under the
+opener, which is also the width the fill is measured against."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial "foo(); /* aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll */\n")
+        (text-expected
+         (concat "foo(); /* aaa bbb ccc ddd eee fff ggg\n" "        * hhh iii jjj kkk lll */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-code-before-block-comment-fill-twice-keeps-text ()
+  "Filling twice must not delete comment text or duplicate the code.
+Merging the code into the comment on the first fill is a separate
+defect, limited to modes not derived from `prog-mode'.  That first fill
+takes the prose path, so the result still shifts once when the comment
+filler takes over, only the text and the settled result are asserted."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 44)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "<p>AAA_ONE</p>\n"
+          "<!-- aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo. -->\n"
+          "<p>ZZZ_TWO</p>\n")))
+    (with-temp-buffer
+      (html-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (fancy-fill-paragraph)
+        (goto-char (point-min))
+        (fancy-fill-paragraph)
+        (let ((text-twice (buffer-string)))
+          ;; No comment text may be dropped.
+          (dolist (word
+                   (list
+                    "aaa"
+                    "bbb"
+                    "ccc"
+                    "ddd"
+                    "eee"
+                    "fff"
+                    "ggg"
+                    "hhh"
+                    "iii"
+                    "jjj"
+                    "kkk"
+                    "lll"
+                    "mmm"
+                    "nnn"
+                    "ooo."))
+            (should (string-match-p (regexp-quote word) text-twice)))
+          ;; The code must not be repeated onto a wrapped line.
+          (should (equal 1 (how-many (regexp-quote "<p>AAA_ONE</p>") (point-min) (point-max))))
+          (goto-char (point-min))
+          (fancy-fill-paragraph)
+          (should (equal text-twice (buffer-string))))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-continuation-prefix-preserved ()
+  "A block comment on its own line keeps its indent and `*' continuation.
+Rejecting a non-blank body indent must not disturb the ordinary case."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial "  /* aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn */\n")
+        (text-expected
+         (concat "  /* aaa bbb ccc ddd eee fff ggg hhh iii\n" "   * jjj kkk lll mmm nnn */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
 
@@ -1226,6 +1305,17 @@ plain prose fill even where that merges the code into the comment."
         (goto-char (point-min))
         (should (fancy-fill-paragraph))
         (should (equal text-expected (buffer-string)))))))
+
+(ert-deftest extract-body-indent-tab-straddling-opener-column ()
+  "A tab reaching past OPENER-COL is kept whole, there is nothing to pad.
+Padding by the difference would be negative, which is an error rather
+than a wrong result."
+  (with-fancy-fill-paragraph-test "\tfoo bar\n"
+    (setq tab-width 8)
+    (should (equal "\t" (fancy-fill-paragraph--extract-body-indent (point-min) 4))))
+  (with-fancy-fill-paragraph-test "  foo bar\n"
+    ;; Blank-space short of OPENER-COL is padded out to it.
+    (should (equal "    " (fancy-fill-paragraph--extract-body-indent (point-min) 4)))))
 
 (ert-deftest fill-region-end-past-point-max-does-not-stall ()
   "A stale END past `point-max' must not make filling loop forever."
