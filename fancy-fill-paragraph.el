@@ -268,6 +268,29 @@ nothing."
     (skip-chars-forward " \t\n" end)
     (< (point) end)))
 
+(defsubst fancy-fill-paragraph--line-matches-prefix-p (cont-prefix)
+  "Return non-nil when point up to end of line begins with CONT-PREFIX.
+Trailing blank-space is trimmed from a line holding nothing else, so
+the text is padded with a space before comparing, accepting a line
+that carries CONT-PREFIX without its trailing space."
+  (declare (important-return-value t))
+  (string-prefix-p cont-prefix (concat (buffer-substring-no-properties (point) (pos-eol)) " ")))
+
+(defsubst fancy-fill-paragraph--move-past-line-prefix (prefix-column-width cont-prefix)
+  "Move point past the prefix on the line at point.
+CONT-PREFIX, when non-nil, is the prefix the line is expected to carry.
+A line without it holds body text where the prefix should be, cutting
+PREFIX-COLUMN-WIDTH columns from that deletes the text, so only its
+leading blank-space is skipped.
+Pass it only for a synthesized prefix.  The comparison is literal, so a
+prefix read from the buffer rejects lines that reach the same column
+with different blank-space, tabs against spaces for instance."
+  (cond
+   ((or (null cont-prefix) (fancy-fill-paragraph--line-matches-prefix-p cont-prefix))
+    (move-to-column prefix-column-width))
+   (t
+    (skip-chars-forward " \t" (pos-eol)))))
+
 (defsubst fancy-fill-paragraph--string-blank-or-empty-p (str)
   "Return non-nil if STR is empty or contains only blank-space and newlines."
   (declare (important-return-value t))
@@ -1350,9 +1373,8 @@ without its trailing space."
     (goto-char body-beg)
     (let ((all-match t))
       (while (and all-match (<= (point) body-end))
-        (let ((line (buffer-substring-no-properties (point) (pos-eol))))
-          (unless (string-prefix-p cont-prefix (concat line " "))
-            (setq all-match nil)))
+        (unless (fancy-fill-paragraph--line-matches-prefix-p cont-prefix)
+          (setq all-match nil))
         (forward-line 1))
       all-match)))
 
@@ -1465,8 +1487,14 @@ the literal prefix string occupies).
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
   (let* ((prefix-col (or prefix-col (fancy-fill-paragraph--prefix-column-width beg cont-prefix)))
+         ;; FIRST-LINE-TEXT supplies the opener line, so every line in the
+         ;; range is a continuation carrying the synthesized CONT-PREFIX.
+         ;; Without it the range opens on the delimiter line, and the prefix
+         ;; was read from the buffer, so neither may be matched literally.
+         (cont-prefix-literal (and first-line-text cont-prefix))
          (lines
-          (fancy-fill-paragraph--strip-region-lines beg (min (1+ end) (point-max)) prefix-col))
+          (fancy-fill-paragraph--strip-region-lines beg (min (1+ end) (point-max)) prefix-col
+                                                    cont-prefix-literal))
          (lines
           (cond
            (first-line-text
@@ -1574,20 +1602,12 @@ The plist contains:
            (<= (- (pos-eol) last-bol) prefix-col)
            (buffer-substring-no-properties last-bol (pos-eol))))))
 
-(defsubst fancy-fill-paragraph--block-comment-prefix-p (str)
-  "Return non-nil when STR is blank-space around a run of continuation marks.
-Distinguishes a wrapped line that carries a prefix from one that begins
-with body text.  Only a single run is accepted, body text opening with
-punctuation is kept rather than cut."
-  (declare (important-return-value t))
-  (string-match-p "\\`[ \t]*[^ \t[:alnum:]]*[ \t]*\\'" str))
-
 (defun fancy-fill-paragraph--block-comment-inline-lines
-    (beg end opener-col prefix-col last-line-verbatim)
+    (beg end opener-col prefix-col cont-prefix last-line-verbatim)
   "Return inline block comment content lines stripped for filling.
 BEG and END are the full region bounds.  OPENER-COL is used for the
-first line, PREFIX-COL for continuation lines, and LAST-LINE-VERBATIM,
-when non-nil, is excluded from the returned content."
+first line, PREFIX-COL for continuation lines carrying CONT-PREFIX, and
+LAST-LINE-VERBATIM, when non-nil, is excluded from the returned content."
   (declare (important-return-value t))
   (let* ((last-bol (fancy-fill-paragraph--last-bol end))
          (content-end-bol
@@ -1602,16 +1622,8 @@ when non-nil, is excluded from the returned content."
       (let ((result (list (buffer-substring-no-properties (point) (pos-eol)))))
         (forward-line 1)
         (while (< (point) content-end-bol)
-          (let ((bol (point)))
-            (move-to-column prefix-col)
-            ;; Continuation lines normally carry the prefix, however filling
-            ;; a second time can leave one starting with body text.  Cutting
-            ;; PREFIX-COL columns from that deletes the text, so keep it.
-            (unless (fancy-fill-paragraph--block-comment-prefix-p
-                     (buffer-substring-no-properties bol (point)))
-              (goto-char bol)
-              (skip-chars-forward " \t" (pos-eol)))
-            (push (buffer-substring-no-properties (point) (pos-eol)) result))
+          (fancy-fill-paragraph--move-past-line-prefix prefix-col cont-prefix)
+          (push (buffer-substring-no-properties (point) (pos-eol)) result)
           (forward-line 1))
         (nreverse result)))))
 
@@ -1635,7 +1647,7 @@ OPENER-COL is the column where content begins after the opener delimiter."
          (filled-result
           (fancy-fill-paragraph--fill-and-reprefix
            (fancy-fill-paragraph--block-comment-inline-lines
-            beg end opener-col prefix-col last-line-verbatim)
+            beg end opener-col prefix-col cont-prefix last-line-verbatim)
            (max 1 (- fill-column prefix-col)) cont-prefix
            opener-text))
          (result
@@ -1866,15 +1878,18 @@ If PREFIX does not match every line, fall back to the minimum line indent."
                    first-line prefix prefix-column-width dp-list)))
       (fancy-fill-paragraph--validated-fill-prefix beg end prefix prefix-column-width))))
 
-(defun fancy-fill-paragraph--strip-region-lines (beg end prefix-column-width)
-  "Return region lines from BEG..END with PREFIX-COLUMN-WIDTH stripped."
+(defun fancy-fill-paragraph--strip-region-lines (beg end prefix-column-width &optional cont-prefix)
+  "Return region lines from BEG..END with PREFIX-COLUMN-WIDTH stripped.
+CONT-PREFIX, when non-nil, is the prefix the lines are expected to
+carry, see `fancy-fill-paragraph--move-past-line-prefix' for what it
+does and when it may be passed."
   (declare (important-return-value t))
   (setq end (min end (point-max)))
   (save-excursion
     (let ((result nil))
       (goto-char beg)
       (while (< (point) end)
-        (move-to-column prefix-column-width)
+        (fancy-fill-paragraph--move-past-line-prefix prefix-column-width cont-prefix)
         (push (buffer-substring-no-properties (point) (pos-eol)) result)
         (forward-line 1))
       (nreverse result))))

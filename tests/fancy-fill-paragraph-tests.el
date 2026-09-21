@@ -726,6 +726,67 @@ Rejecting a non-blank body indent must not disturb the ordinary case."
       (let ((inhibit-message t))
         (should-fill-same-from-every-position text-initial 0 text-expected)))))
 
+(ert-deftest fill-syntax-bounds-block-comment-rule-line-keeps-text ()
+  "A body line holding no letters must not be taken for a continuation prefix.
+Cutting the prefix width from a rule line deletes it, only a line that
+carries the prefix may be cut."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "int x = 1; /* aaa bbb ccc ddd eee fff ggg hhh iii jjj\n" "-------------------- */\n"))
+        (text-expected
+         (concat
+          "int x = 1; /* aaa bbb ccc ddd eee\n"
+          "            * fff ggg hhh iii jjj\n"
+          "            * -------------------- */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        ;; Every position, the loss only showed with the cursor inside the
+        ;; comment.  A cursor on the code never reproduced it.
+        (should-fill-same-from-every-position text-initial 0 text-expected)
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-block-comment-rule-line-survives-refill ()
+  "Repeated fills must not shorten a rule line, from any cursor position.
+The layout settles over two passes, the text itself must never change."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         (concat
+          "int x = 1; /* aaa bbb ccc ddd eee fff ggg hhh iii jjj\n" "-------------------- */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        ;; Filling from inside the comment is what lost the text, so step
+        ;; every position rather than resting on `point-min'.
+        (dotimes (offset (length text-initial))
+          (buffer-reset-text text-initial)
+          (dotimes (_ 3)
+            (goto-char (min (+ (point-min) offset) (point-max)))
+            (fancy-fill-paragraph))
+          (should (equal 20 (length (replace-regexp-in-string "[^-]" "" (buffer-string))))))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-body-rule-line-keeps-text ()
+  "A rule line in a block comment body keeps every character.
+The opener line carries text, so it is filled together with the body
+and the body lines are stripped against the synthesized prefix.  A line
+not carrying that prefix holds body text where the prefix should be,
+cutting the prefix width from it deletes the text."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 25)
+        (sentence-end-double-space nil)
+        (text-initial (concat "/* aaa bbb ccc ddd eee\n" "--------------------\n" " */\n"))
+        (text-expected (concat "/* aaa bbb ccc ddd eee\n" " * --------------------\n" " */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
 
@@ -1234,6 +1295,18 @@ Rejecting a non-blank body indent must not disturb the ordinary case."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest line-matches-prefix-p-accepts-a-line-without-the-trailing-space ()
+  "A line holding the prefix without its trailing space still matches.
+Trailing blank-space is trimmed from a line holding nothing else, so
+the padding is what keeps a blank body line from being treated as text."
+  (with-fancy-fill-paragraph-test (concat " *\n" " * aaa\n" " *bbb\n")
+    (goto-char (point-min))
+    (should (fancy-fill-paragraph--line-matches-prefix-p " * "))
+    (forward-line 1)
+    (should (fancy-fill-paragraph--line-matches-prefix-p " * "))
+    (forward-line 1)
+    (should-not (fancy-fill-paragraph--line-matches-prefix-p " * "))))
+
 (ert-deftest range-has-non-blank-p-empty-and-reversed-ranges ()
   "An empty or reversed range holds nothing, whatever lies between.
 The code-beside-comment scan relies on this, an opener preceding the
@@ -1252,6 +1325,23 @@ scan position reverses the range it checks for code."
   (with-fancy-fill-paragraph-test "aaa  bbb\n"
     (with-forward-line-stall-guard
       (should (equal '("aaa  bbb") (fancy-fill-paragraph--strip-region-lines 1 12 0))))))
+
+(ert-deftest strip-region-lines-keeps-a-line-without-the-prefix ()
+  "A line that does not carry the prefix must keep every character.
+Only its leading blank-space is removed, cutting the prefix width from
+body text deletes it."
+  (with-fancy-fill-paragraph-test " * aaa\n--------\n"
+    (should
+     (equal
+      '("aaa" "--------")
+      (fancy-fill-paragraph--strip-region-lines (point-min) (point-max) 3 " * ")))))
+
+(ert-deftest strip-region-lines-without-a-prefix-cuts-by-column ()
+  "With no prefix to check, every line is cut at the given column."
+  (with-fancy-fill-paragraph-test " * aaa\n--------\n"
+    (should
+     (equal
+      '("aaa" "-----") (fancy-fill-paragraph--strip-region-lines (point-min) (point-max) 3)))))
 
 (ert-deftest syntax-region-at-closed-regions ()
   "A closed comment or string reports its kind and the position after its closer."
@@ -1316,6 +1406,25 @@ than a wrong result."
   (with-fancy-fill-paragraph-test "  foo bar\n"
     ;; Blank-space short of OPENER-COL is padded out to it.
     (should (equal "    " (fancy-fill-paragraph--extract-body-indent (point-min) 4)))))
+
+(ert-deftest fill-syntax-bounds-block-comment-tab-body-under-space-opener ()
+  "A tab-indented body line under a space-indented opener fills.
+The opener column falls inside the tab, so the indent taken from the
+body line already reaches past it."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 25)
+        (sentence-end-double-space nil)
+        (text-initial (concat "  x(); /* aaa bbb ccc ddd eee\n" "\tttt uuu vvv www\n" " */\n"))
+        (text-expected
+         (concat "  x(); /* aaa bbb ccc\n" "\t * ddd eee ttt\n" "\t * uuu vvv www\n" " */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (setq tab-width 8)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (should (fancy-fill-paragraph))
+        (should (equal text-expected (buffer-string)))))))
 
 (ert-deftest fill-region-end-past-point-max-does-not-stall ()
   "A stale END past `point-max' must not make filling loop forever."
