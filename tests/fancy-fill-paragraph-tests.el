@@ -3588,6 +3588,138 @@ left out of the paragraph, however long."
         (should-fill-same-from-every-position text-initial 1 text-expected)
         (should-fill-same-from-every-position text-initial-bare 1 text-expected-bare)))))
 
+(ert-deftest fill-syntax-bounds-python-docstring-summary-keeps-indent ()
+  "A summary line wrapped above a blank line keeps the body indentation.
+The indentation was taken from the line after the opener, blank in this
+common layout, so wrapped summary lines lost theirs."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 24)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "    Iii jjj.\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "\n"
+                 "    Iii jjj.\n"
+                 "    \"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-summary-above-indented-example ()
+  "A summary line wrapped above an indented example keeps the body indentation.
+The indentation was taken from the first non-blank line after the
+opener, an example indented deeper than the doc-string."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 24)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "        >>> example()\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "\n"
+                 "        >>> example()\n"
+                 "    \"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-python-string-closer-shallower-than-text ()
+  "A string's wrapped first line keeps its text's indentation.
+The closer line is less indented than the text, it was taken for the
+indentation of the lines continuing the opener line.  After code, it's
+not taken for a summary line on its own either."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    parser.add(help=\"\"\"Aaa bbb ccc ddd eee fff.\n"
+                 "        Ggg hhh iii jjj kkk.\n"
+                 "    \"\"\")\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    parser.add(help=\"\"\"Aaa bbb ccc ddd\n"
+                 "        eee fff. Ggg hhh iii jjj kkk.\n"
+                 "    \"\"\")\n"))
+        (text-initial-summary
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    parser.add(help=\"\"\"Aaa bbb ccc ddd eee fff.\n"
+                 "\n"
+                 "        Ggg hhh iii jjj kkk.\n"
+                 "    \"\"\")\n"))
+        (text-expected-summary
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    parser.add(help=\"\"\"Aaa bbb ccc ddd\n"
+                 "        eee fff.\n"
+                 "\n"
+                 "        Ggg hhh iii jjj kkk.\n"
+                 "    \"\"\")\n"))
+        (text-initial-module
+         ;; format-next-line: off
+         (concat "x = \"\"\"Aaa bbb ccc ddd eee fff ggg hhh iii jjj.\n"
+                 "    Kkk lll mmm.\n"
+                 "\"\"\"\n"))
+        (text-expected-module
+         ;; format-next-line: off
+         (concat "x = \"\"\"Aaa bbb ccc ddd eee fff ggg hhh\n"
+                 "    iii jjj. Kkk lll mmm.\n"
+                 "\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        (should-fill-same-from-every-position text-initial-module 0 text-expected-module)
+        (should-fill-same-from-every-position text-initial-summary 1 text-expected-summary)))))
+
+(ert-deftest fill-syntax-bounds-elisp-docstring-summary-keeps-column-zero ()
+  "A doc-string summary wrapped above body lines at column zero keeps it.
+The closer line is indented deeper than the text, the least
+indentation is used."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "(defun f ()\n"
+                 "  \"Aaa bbb ccc ddd eee fff ggg hhh iii.\n"
+                 "Jjj kkk.\n"
+                 "  \"\n"
+                 "  nil)\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "(defun f ()\n"
+                 "  \"Aaa bbb ccc ddd eee fff ggg\n"
+                 "hhh iii. Jjj kkk.\n"
+                 "  \"\n"
+                 "  nil)\n")))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
 (ert-deftest fill-syntax-bounds-python-docstring-cursor-on-closer-line ()
   "A cursor on the closing quotes fills the docstring they close.
 The quotes after the closing fence read as an empty string, which was

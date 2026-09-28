@@ -1624,16 +1624,52 @@ Returns non-nil when the buffer was modified."
                                                    first-prefix
                                                    prefix-col)))
 
-(defun fancy-fill-paragraph--string-continuation-prefix (inner-body)
+(defun fancy-fill-paragraph--string-continuation-prefix (inner-body closer-alone-bol)
   "Return the continuation prefix for a multi-line string with opener text.
 INNER-BODY is the raw body bounds (first line after opener to last line
-before closer).  Returns the indentation of the first body line as a
-blank-space string."
+before closer).  Returns a blank-space string, the least indentation of
+the lines continuing the opener line's paragraph.  When the opener line
+is a paragraph of its own (a summary line for e.g.), the closer line's
+indentation is used when CLOSER-ALONE-BOL is non-nil, see
+`fancy-fill-paragraph--string-closer-alone-bol', otherwise the least
+indentation of the non-blank lines after it, the closer line when there
+are none.
+
+NOTE: a closer alone on its line is preferred to the text, which could
+be an indented example alone (a Python doc-test for e.g.), deeper than
+the doc-string.  Otherwise the closer may be less indented than the text
+\(`\"\"\")' after an argument for e.g.), so the text is used."
   (declare (important-return-value t))
   (save-excursion
     (goto-char (car inner-body))
-    (skip-chars-forward " \t" (pos-eol))
-    (buffer-substring-no-properties (pos-bol) (point))))
+    (let ((closer-bol (1+ (cdr inner-body)))
+          (in-first-para t)
+          (para-indent nil)
+          (body-col nil)
+          (body-indent nil)
+          (closer-indent nil))
+      (while (progn
+               (skip-chars-forward " \t" (pos-eol))
+               (cond
+                ((= (pos-bol) closer-bol)
+                 (setq closer-indent (buffer-substring-no-properties (pos-bol) (point))))
+                ((eolp)
+                 (setq in-first-para nil))
+                ((or (null body-col) (< (current-column) body-col))
+                 (setq body-col (current-column))
+                 (setq body-indent (buffer-substring-no-properties (pos-bol) (point)))
+                 ;; Only lines of the first paragraph were seen, so the
+                 ;; least indentation of the body is that of the paragraph.
+                 (when in-first-para
+                   (setq para-indent body-indent))))
+               (and (< (pos-bol) closer-bol) (zerop (forward-line 1)))))
+      (cond
+       (para-indent
+        para-indent)
+       ((and closer-alone-bol closer-indent)
+        closer-indent)
+       (t
+        (or body-indent closer-indent ""))))))
 
 (defun fancy-fill-paragraph--fill-multiline-syntax-body
     (beg
@@ -1903,9 +1939,6 @@ while text on the closer line joins the last paragraph."
          (opener-info
           (when inner-body
             (fancy-fill-paragraph--string-opener-info opener-pos)))
-         (cont-prefix
-          (when (and inner-body (plist-get opener-info :text))
-            (fancy-fill-paragraph--string-continuation-prefix inner-body)))
          (closer-end (fancy-fill-paragraph--string-end opener-pos))
          ;; Code after the closer shares the region; reflowing it as
          ;; string text would corrupt it.  A string that never closes
@@ -1913,7 +1946,10 @@ while text on the closer line joins the last paragraph."
          (closer-blocked
           (or (null closer-end) (fancy-fill-paragraph--code-after-closer-p closer-end)))
          ;; A closer on its own line stays there in both fills below.
-         (closer-alone-bol (fancy-fill-paragraph--string-closer-alone-bol beg end)))
+         (closer-alone-bol (fancy-fill-paragraph--string-closer-alone-bol beg end))
+         (cont-prefix
+          (when (and inner-body (plist-get opener-info :text))
+            (fancy-fill-paragraph--string-continuation-prefix inner-body closer-alone-bol))))
     (fancy-fill-paragraph--fill-syntax-region
      beg end inner-body
      (lambda ()
