@@ -127,8 +127,9 @@ see `advice-add' documentation."
   "Split TEXT and return the items list."
   (plist-get (fancy-fill-paragraph--paragraph-to-items text) :items))
 
-(defun test-split-and-solve (text fill-col)
-  "Split TEXT and solve with FILL-COL, returning result as a string."
+(defun test-split-and-solve (text fill-col &optional first-line-extra)
+  "Split TEXT and solve with FILL-COL, returning result as a string.
+FIRST-LINE-EXTRA is passed to the solver as is."
   (let* ((split-result (fancy-fill-paragraph--paragraph-to-items text))
          (items (plist-get split-result :items)))
     (mapconcat #'identity
@@ -138,7 +139,8 @@ see `advice-add' documentation."
                 (plist-get split-result :break-weights)
                 (plist-get split-result :seps)
                 (plist-get split-result :sep-lens)
-                fancy-fill-paragraph-blank-space-weight)
+                fancy-fill-paragraph-blank-space-weight
+                first-line-extra)
                "\n")))
 
 
@@ -847,6 +849,26 @@ The cursor path already refuses this, a selection must refuse it too."
         (should (fancy-fill-paragraph))
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-lines-first-line-extra-width-first-line-only ()
+  "The first line's extra width narrows the first line only.
+Whichever section holds the first line takes it: prose before a list,
+the first list item or the first indentation group."
+  (let ((dp-list (fancy-fill-paragraph--compile-dot-point-patterns))
+        (sentence-end-double-space nil))
+    (should
+     (equal
+      '("aaa bbb" "ccc ddd" "- eee fff" "  ggg hhh" "- iii jjj" "  kkk lll")
+      (fancy-fill-paragraph--fill-lines
+       '("aaa bbb ccc ddd" "- eee fff ggg hhh" "- iii jjj kkk lll") 11 dp-list 4)))
+    (should
+     (equal
+      '("- eee" "  fff ggg" "  hhh" "- iii jjj" "  kkk lll")
+      (fancy-fill-paragraph--fill-lines '("- eee fff ggg hhh" "- iii jjj kkk lll") 11 dp-list 4)))
+    (should
+     (equal
+      '("aaa bbb" "ccc ddd" "  eee fff" "  ggg hhh")
+      (fancy-fill-paragraph--fill-lines '("aaa bbb ccc ddd" "  eee fff ggg hhh") 11 dp-list 4)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Split Tests
 
@@ -1216,6 +1238,31 @@ The cursor path already refuses this, a selection must refuse it too."
     ;; "Alpha." (6) + "  " (2) + "Beta." (5) = 13, exceeds fill-col 12.
     ;; Must split onto two lines.
     (should (equal text-expected (test-split-and-solve text-initial 12)))))
+
+(ert-deftest solve-first-line-extra-slack ()
+  "The first line's slack is measured with its extra width."
+  (let ((text-initial "a b c")
+        (text-expected
+         ;; format-next-line: off
+         (concat "a b\n"
+                 "c"))
+        (sentence-end-double-space nil))
+    ;; "a b" (3) + extra (3) = 6, filling fill-col 6.
+    ;; Measured without the extra, breaking after "a" looks better.
+    (should (equal text-expected (test-split-and-solve text-initial 6 3)))))
+
+(ert-deftest solve-first-line-extra-single-item ()
+  "A single item on the first line is measured with its extra width."
+  (let ((text-initial "a b ccc dddd")
+        (text-expected
+         ;; format-next-line: off
+         (concat "a\n"
+                 "b ccc\n"
+                 "dddd"))
+        (sentence-end-double-space nil))
+    ;; "a" (1) + extra (4) = 5, as wide as "b ccc" (5).
+    ;; Measured without the extra, "a" alone looks too short to keep.
+    (should (equal text-expected (test-split-and-solve text-initial 7 4)))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -3204,6 +3251,150 @@ it, its width being taken from the opener."
       (let ((inhibit-message t))
         (should-fill-same-from-every-position text-initial 0 text-expected)
         (should-fill-same-from-every-position text-initial-spaced 0 text-expected-spaced)))))
+
+(ert-deftest fill-syntax-bounds-c-mode-javadoc-opener-width ()
+  "The first line after a `/** ' opener is one column narrower.
+The opener is wider than the ` * ' continuation, which alone set the
+width, so the first line ran past `fill-column'."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (text-initial-multiline
+         ;; format-next-line: off
+         (concat "/** aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n"
+                 " * lll\n"
+                 " */\n"))
+        (text-expected-multiline
+         ;; format-next-line: off
+         (concat "/** aaa bbb ccc\n"
+                 " * ddd eee fff ggg\n"
+                 " * hhh iii jjj kkk\n"
+                 " * lll\n"
+                 " */\n"))
+        (text-initial-inline "/** aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk */\n")
+        (text-expected-inline
+         ;; format-next-line: off
+         (concat "/** aaa bbb ccc ddd\n"
+                 " * eee fff ggg hhh iii\n"
+                 " * jjj kkk */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (let ((fill-column 18))
+          (should-fill-same-from-every-position text-initial-multiline 0 text-expected-multiline))
+        (let ((fill-column 22))
+          (should-fill-same-from-every-position text-initial-inline 0 text-expected-inline))))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-opener-width ()
+  "The first line after the opening quotes is narrower by their width.
+The continuation prefix alone set the width, so the first line ran past
+`fill-column'."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"aaa bbb ccc ddd eee fff ggg hhh iii\n"
+                 "    jjj\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"aaa bbb ccc\n"
+                 "    ddd eee fff ggg\n"
+                 "    hhh iii jjj\n"
+                 "    \"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-opener-width-dot-points ()
+  "Dot points after the opener text are not narrowed by the opener.
+Each dot point fills on its own, only the first line of the first takes
+the opener's width."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Intro aaa bbb ccc ddd eee fff ggg.\n"
+                 "    - item one aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "    - item two aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Intro aaa bbb ccc ddd\n"
+                 "    eee fff ggg.\n"
+                 "    - item one aaa bbb ccc ddd\n"
+                 "      eee fff ggg hhh.\n"
+                 "    - item two aaa bbb ccc ddd\n"
+                 "      eee fff ggg hhh.\n"
+                 "    \"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-narrow-opener-width ()
+  "An opener narrower than the continuation prefix leaves the width as it is.
+The first line holds as much text as the others, it is not widened to
+end at `fill-column'."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "\"\"\"aaaa bbb ccc ddd eee fff ggg hhh iii\n"
+                 "    jjj\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "\"\"\"aaaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh\n"
+                 "    iii jjj\n"
+                 "    \"\"\"\n"))
+        ;; Balancing the lines also takes the first line to be as wide.
+        (text-initial-balance
+         ;; format-next-line: off
+         (concat "\"\"\"a bbbbbbb ccc d eeeeeee ff g hhhhh\n"
+                 "    ii\n"
+                 "    \"\"\"\n"))
+        (text-expected-balance
+         ;; format-next-line: off
+         (concat "\"\"\"a bbbbbbb ccc\n"
+                 "    d eeeeeee ff g\n"
+                 "    hhhhh ii\n"
+                 "    \"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)
+        (let ((fill-column 21))
+          (should-fill-same-from-every-position text-initial-balance 0 text-expected-balance))))))
+
+(ert-deftest fill-syntax-bounds-python-string-opener-width-beside-code ()
+  "Code before a string opener narrows the first line, code after the closer is kept.
+The closer line holds code, so it stays out of the paragraph."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "x = \"\"\"aaa bbb\n"
+                 "ccc ddd eee fff ggg hhh iii jjj\n"
+                 "\"\"\" + y\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "x = \"\"\"aaa bbb ccc ddd eee fff\n"
+                 "ggg hhh iii jjj\n"
+                 "\"\"\" + y\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -5357,8 +5548,8 @@ style c from either character of a two-character opener."
           "    \"\"\""))
         (text-expected
          (concat
-          "    r\"\"\"Alpha bravo charlie delta echo foxtrot golf\n"
-          "    hotel. India juliet kilo.\n"
+          "    r\"\"\"Alpha bravo charlie delta echo foxtrot\n"
+          "    golf hotel. India juliet kilo.\n"
           "    \"\"\"")))
     (with-temp-buffer
       (python-mode)

@@ -727,12 +727,16 @@ the first entry in the table takes priority.")
 ;; Private Functions
 
 (defun fancy-fill-paragraph--fill-paragraphs-in-string
-    (text local-fill-column &optional suppress-prefix)
+    (text local-fill-column &optional first-line-extra-width)
   "Fill each paragraph in TEXT independently within LOCAL-FILL-COLUMN.
 Paragraphs are separated by blank lines.  Returns the filled text
 with paragraph separators preserved.
-When SUPPRESS-PREFIX is non-nil, set `fill-prefix' to the empty string
-so `fill-context-prefix' detection is suppressed."
+`fill-prefix' is set to the empty string, the caller has already
+stripped the prefix, so `fill-context-prefix' detection is suppressed.
+FIRST-LINE-EXTRA-WIDTH, when non-nil, is how many columns the first
+line takes beyond the others, when it carries an opener prefix of
+another width (e.g. `/** ' beside ` * ').  Only the opening paragraph
+holds the first line."
   (declare (important-return-value t))
   ;; Nothing to fill when text is empty or blank-space-only.
   (cond
@@ -741,17 +745,24 @@ so `fill-context-prefix' detection is suppressed."
    (t
     (with-temp-buffer
       (insert text)
-      (let ((fill-column local-fill-column)
-            (fill-prefix (and suppress-prefix "")))
-        (fancy-fill-paragraph--fill-paragraph-bounds
-         (fancy-fill-paragraph--collect-paragraph-bounds (point-min) (point-max))))
+      (let* ((fill-column local-fill-column)
+             (fill-prefix "")
+             ;; Reverse ordered, so the opening paragraph is last.
+             (bounds (fancy-fill-paragraph--collect-paragraph-bounds (point-min) (point-max))))
+        (fancy-fill-paragraph--fill-paragraph-bounds (butlast bounds))
+        ;; The text is not blank, so there is an opening paragraph.
+        (let ((para (car (last bounds))))
+          (fancy-fill-paragraph--fill-region (car para) (cdr para) first-line-extra-width)))
       (buffer-string)))))
 
 (defun fancy-fill-paragraph--fill-and-reprefix
-    (lines local-fill-column cont-prefix &optional first-prefix)
+    (lines local-fill-column cont-prefix &optional first-prefix first-line-extra-width)
   "Fill LINES within LOCAL-FILL-COLUMN and re-add CONT-PREFIX to each output line.
 FIRST-PREFIX, when non-nil, is used instead of CONT-PREFIX on the
-first output line (e.g. for a comment opener like \"/** \")."
+first output line (e.g. for a comment opener like \"/** \").
+FIRST-LINE-EXTRA-WIDTH, when non-nil, is how many columns FIRST-PREFIX
+takes beyond CONT-PREFIX, narrowing the first line by as much.  It is
+never negative."
   (declare (important-return-value t))
   (let ((stripped-text (mapconcat #'identity lines "\n")))
     ;; Return nil when stripped text is empty or blank-space-only.
@@ -760,7 +771,8 @@ first output line (e.g. for a comment opener like \"/** \")."
       nil)
      (t
       (let* ((filled-text
-              (fancy-fill-paragraph--fill-paragraphs-in-string stripped-text local-fill-column t))
+              (fancy-fill-paragraph--fill-paragraphs-in-string stripped-text local-fill-column
+                                                               first-line-extra-width))
              (prefix-trimmed (string-trim-right cont-prefix))
              (filled-lines (split-string filled-text "\n"))
              (is-first t))
@@ -1453,10 +1465,19 @@ PREFIX-COL, when non-nil, is the buffer-measured width of CONT-PREFIX.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
   (let* ((prefix-col (or prefix-col (string-width cont-prefix)))
+         ;; FIRST-PREFIX starts at REPLACE-BEG, measure its end column there,
+         ;; so code before a trailing comment's opener is counted too.
+         ;; A narrower FIRST-PREFIX leaves the first line as wide as the others.
+         (first-line-extra-width
+          (and first-prefix
+               (max 0
+                    (- (fancy-fill-paragraph--prefix-column-width
+                        replace-beg first-prefix)
+                       prefix-col))))
          (result
           (fancy-fill-paragraph--fill-and-reprefix
            lines (max 1 (- fill-column prefix-col)) cont-prefix
-           first-prefix)))
+           first-prefix first-line-extra-width)))
     (when result
       (fancy-fill-paragraph--replace-region replace-beg replace-end result))))
 
@@ -1662,23 +1683,20 @@ OPENER-COL is the column where content begins after the opener delimiter."
             (move-to-column opener-col)
             (buffer-substring-no-properties beg (point))))
          (last-line-verbatim
-          (fancy-fill-paragraph--block-comment-inline-closer beg end prefix-col))
-         (filled-result
-          (fancy-fill-paragraph--fill-and-reprefix
-           (fancy-fill-paragraph--block-comment-inline-lines
-            beg end opener-col prefix-col cont-prefix last-line-verbatim)
-           (max 1 (- fill-column prefix-col)) cont-prefix
-           opener-text))
-         (result
-          (cond
-           ((null filled-result)
-            nil)
-           (last-line-verbatim
-            (concat filled-result "\n" last-line-verbatim))
-           (t
-            filled-result))))
-    (when result
-      (fancy-fill-paragraph--replace-region beg end result))))
+          (fancy-fill-paragraph--block-comment-inline-closer beg end prefix-col)))
+    ;; A verbatim closer line is left in place, the fill ends before it.
+    (fancy-fill-paragraph--fill-prefixed-paragraph
+     (fancy-fill-paragraph--block-comment-inline-lines
+      beg end opener-col prefix-col cont-prefix last-line-verbatim)
+     beg
+     (cond
+      (last-line-verbatim
+       (1- (fancy-fill-paragraph--last-bol end)))
+      (t
+       end))
+     cont-prefix
+     opener-text
+     prefix-col)))
 
 (defun fancy-fill-paragraph--fill-block-comment-region
     (beg end comment-start-pos &optional sel-beg sel-end)
@@ -1993,13 +2011,22 @@ Returns a plist with keys:
         (list :items items :break-weights break-weights :seps seps :sep-lens sep-lens)))))
 
 (defun fancy-fill-paragraph--solve
-    (items local-fill-column break-weights seps sep-lens blank-space-weight)
+    (items
+     local-fill-column
+     break-weights
+     seps
+     sep-lens
+     blank-space-weight
+     &optional
+     first-line-extra-width)
   "Find optimal line breaks for ITEMS within LOCAL-FILL-COLUMN.
 ITEMS is a list of strings to arrange into lines.
 BREAK-WEIGHTS is a vector of break preference weights per item boundary.
 SEPS is a vector of separator strings per item boundary.
 SEP-LENS is a vector of separator lengths per item boundary.
 BLANK-SPACE-WEIGHT controls joining items across delimiters (0-100).
+FIRST-LINE-EXTRA-WIDTH, when non-nil, is a non-negative width added to
+the first line, which begins after a prefix wider than the others.
 Returns a list of strings, one per output line.
 Uses dynamic programming to minimize raggedness."
   (declare (important-return-value t))
@@ -2038,6 +2065,9 @@ Uses dynamic programming to minimize raggedness."
         (aset lens i (string-width (car items-remaining)))
         (setq items-remaining (cdr items-remaining))
         (setq i (1+ i))))
+    ;; Every line starting at item 0 is the first line, so widen the item.
+    (when (and first-line-extra-width (> n 0))
+      (aset lens 0 (+ (aref lens 0) first-line-extra-width)))
 
     ;; DP: cost[i] = minimum cost to arrange items[0..i-1] into lines.
     ;; from[i] = start index of the last line (items[from[i]..i-1]).
@@ -2195,10 +2225,12 @@ DOT-POINTS is from `fancy-fill-paragraph--compile-dot-point-patterns'."
       (setq entries-remaining (cdr entries-remaining)))
     result))
 
-(defun fancy-fill-paragraph--fill-lines-plain (lines local-fill-column)
+(defun fancy-fill-paragraph--fill-lines-plain
+    (lines local-fill-column &optional first-line-extra-width)
   "Fill LINES as a single paragraph within LOCAL-FILL-COLUMN.
 LINES is a list of strings.  Returns a list of result line strings.
-Joins lines, normalizes blank-space, splits at delimiters, and solves."
+Joins lines, normalizes blank-space, splits at delimiters, and solves.
+FIRST-LINE-EXTRA-WIDTH is passed to `fancy-fill-paragraph--solve'."
   (declare (important-return-value t))
   (let* ((source-text (string-trim (mapconcat #'identity lines " ")))
          (normalized (fancy-fill-paragraph--normalize-spaces-with-widths source-text))
@@ -2221,13 +2253,13 @@ Joins lines, normalizes blank-space, splits at delimiters, and solves."
                   (aset break-weights i fancy-fill-paragraph--prevent-dot-point-penalty))
                 (setq items-tail (cdr items-tail))
                 (setq i (1+ i))))))
-        (fancy-fill-paragraph--solve
-         items
-         local-fill-column
-         break-weights
-         (plist-get split-result :seps)
-         (plist-get split-result :sep-lens)
-         fancy-fill-paragraph-blank-space-weight)))
+        (fancy-fill-paragraph--solve items
+                                     local-fill-column
+                                     break-weights
+                                     (plist-get split-result :seps)
+                                     (plist-get split-result :sep-lens)
+                                     fancy-fill-paragraph-blank-space-weight
+                                     first-line-extra-width)))
      (t
       nil))))
 
@@ -2311,11 +2343,13 @@ The result is a plist with keys :min-indent, :preamble, :groups, and
          :groups (nreverse groups)
          :trailing trailing)))))
 
-(defun fancy-fill-paragraph--fill-dot-point-group (group min-indent local-fill-column dp-list)
+(defun fancy-fill-paragraph--fill-dot-point-group
+    (group min-indent local-fill-column dp-list &optional first-line-extra-width)
   "Return filled output lines for one dot-point GROUP.
 GROUP is (DP-PREFIX . RAW-LINES), MIN-INDENT is the shared list indent,
 LOCAL-FILL-COLUMN is the available width, and DP-LIST is passed through
-for recursive dot-point detection."
+for recursive dot-point detection.
+FIRST-LINE-EXTRA-WIDTH, when non-nil, is taken by the item's first line."
   (declare (important-return-value t))
   (let* ((dp-prefix (car group))
          (group-lines (cdr group))
@@ -2331,7 +2365,9 @@ for recursive dot-point detection."
             (lambda (line)
               (fancy-fill-paragraph--strip-indent line indent-plus-dp))
             (cdr group-lines))))
-         (filled (fancy-fill-paragraph--fill-lines body-lines sub-fill-column dp-list))
+         (filled
+          (fancy-fill-paragraph--fill-lines body-lines sub-fill-column dp-list
+                                            first-line-extra-width))
          (result nil)
          (is-first t))
     (dolist (line filled)
@@ -2344,53 +2380,67 @@ for recursive dot-point detection."
             result))
     (nreverse result)))
 
-(defun fancy-fill-paragraph--fill-lines-indent-split (lines local-fill-column dp-list)
+(defun fancy-fill-paragraph--fill-lines-indent-split
+    (lines local-fill-column dp-list &optional first-line-extra-width)
   "Fill LINES, splitting into sub-paragraphs at indentation changes.
 LOCAL-FILL-COLUMN is the target line width.
 Groups consecutive lines with the same leading blank-space and fills
 each group independently via `fancy-fill-paragraph--fill-lines'.
 Falls through to plain fill when all lines share the same indentation.
-DP-LIST is passed through for dot-point detection in recursive calls."
+DP-LIST is passed through for dot-point detection in recursive calls.
+FIRST-LINE-EXTRA-WIDTH, when non-nil, is taken by the first group."
   (declare (important-return-value t))
   (let ((groups (fancy-fill-paragraph--group-lines-by-indent lines)))
     (cond
      ((null (cdr groups))
-      (fancy-fill-paragraph--fill-lines-plain lines local-fill-column))
+      (fancy-fill-paragraph--fill-lines-plain lines local-fill-column first-line-extra-width))
      (t
-      (let ((result nil))
+      (let ((result nil)
+            (extra first-line-extra-width))
         (dolist (group groups)
           (let* ((indent (car group))
                  (group-lines (cdr group))
                  (indent-str (make-string indent ?\s))
                  (sub-fill-column (max 1 (- local-fill-column indent)))
                  (filled
-                  (fancy-fill-paragraph--fill-lines
-                   (mapcar
-                    (lambda (line) (fancy-fill-paragraph--strip-indent line indent)) group-lines)
-                   sub-fill-column dp-list)))
+                  (fancy-fill-paragraph--fill-lines (mapcar
+                                                     (lambda (line)
+                                                       (fancy-fill-paragraph--strip-indent
+                                                        line indent))
+                                                     group-lines)
+                                                    sub-fill-column dp-list
+                                                    extra)))
+            (setq extra nil)
             (setq result (nconc result (mapcar (lambda (line) (concat indent-str line)) filled)))))
         result)))))
 
-(defun fancy-fill-paragraph--fill-lines (lines local-fill-column dp-list)
+(defun fancy-fill-paragraph--fill-lines
+    (lines local-fill-column dp-list &optional first-line-extra-width)
   "Fill LINES within LOCAL-FILL-COLUMN, handling dot-points recursively.
 LINES is a list of strings.  Returns a list of result line strings.
 DP-LIST is a pre-built pattern list from
 `fancy-fill-paragraph--compile-dot-point-patterns'.
 When DP-LIST is non-nil, detects dot-point prefixes and fills each
 item as a separate sub-paragraph.  Falls through to plain fill when
-no dot-points are found."
+no dot-points are found.
+FIRST-LINE-EXTRA-WIDTH, when non-nil, is how many columns the first
+line takes beyond the others, it narrows that line only."
   (declare (important-return-value t))
   (cond
    ;; Dot-point mode disabled (dp-list is nil), skip dot-point scan.
    ((null dp-list)
-    (fancy-fill-paragraph--fill-lines-indent-split lines local-fill-column nil))
+    (fancy-fill-paragraph--fill-lines-indent-split lines local-fill-column nil
+                                                   first-line-extra-width))
    (t
     (let ((sections (fancy-fill-paragraph--partition-dot-point-lines lines dp-list)))
       (cond
        ((null sections)
-        (fancy-fill-paragraph--fill-lines-indent-split lines local-fill-column dp-list))
+        (fancy-fill-paragraph--fill-lines-indent-split lines local-fill-column dp-list
+                                                       first-line-extra-width))
        (t
         (let ((result nil)
+              ;; Taken by whichever section is filled first.
+              (extra first-line-extra-width)
               (min-indent (plist-get sections :min-indent))
               (preamble (plist-get sections :preamble))
               (groups (plist-get sections :groups))
@@ -2398,24 +2448,31 @@ no dot-points are found."
           (when preamble
             (setq result
                   (nconc
-                   result (fancy-fill-paragraph--fill-lines preamble local-fill-column dp-list))))
+                   result
+                   (fancy-fill-paragraph--fill-lines preamble local-fill-column dp-list extra)))
+            (setq extra nil))
           (dolist (group groups)
             (setq result
                   (nconc
                    result
                    (fancy-fill-paragraph--fill-dot-point-group
-                    group min-indent local-fill-column dp-list))))
+                    group min-indent local-fill-column dp-list
+                    extra)))
+            (setq extra nil))
           (when trailing
             (setq result
                   (nconc
-                   result (fancy-fill-paragraph--fill-lines trailing local-fill-column dp-list))))
+                   result
+                   (fancy-fill-paragraph--fill-lines trailing local-fill-column dp-list extra))))
           result)))))))
 
-(defun fancy-fill-paragraph--fill-region (beg end)
+(defun fancy-fill-paragraph--fill-region (beg end &optional first-line-extra-width)
   "Fill the paragraph in the region from BEG to END.
 Detects the fill prefix, strips it, normalizes blank-space,
 splits at delimiter boundaries, solves for optimal line breaks,
-and re-adds the prefix to each output line."
+and re-adds the prefix to each output line.
+FIRST-LINE-EXTRA-WIDTH, when non-nil, narrows the first line, see
+`fancy-fill-paragraph--fill-lines'."
   (setq end (min end (point-max)))
   (let* ((dp-list (fancy-fill-paragraph--compile-dot-point-patterns))
          (prefix-info (fancy-fill-paragraph--analyze-fill-prefix beg end dp-list))
@@ -2426,11 +2483,13 @@ and re-adds the prefix to each output line."
          ;; Always pass dp-list so dot-points are automatically detected;
          ;; `--fill-lines' falls through to plain fill when none are found.
          (filled
-          (fancy-fill-paragraph--fill-lines
-           lines
-           (max 1
-                (- fill-column fancy-fill-paragraph-fill-column-margin prefix-column-width))
-           dp-list)))
+          (fancy-fill-paragraph--fill-lines lines
+                                            (max 1
+                                                 (- fill-column
+                                                    fancy-fill-paragraph-fill-column-margin
+                                                    prefix-column-width))
+                                            dp-list
+                                            first-line-extra-width)))
     (when filled
       (fancy-fill-paragraph--replace-region
        beg end (mapconcat (lambda (line) (concat prefix line)) filled "\n")))))
