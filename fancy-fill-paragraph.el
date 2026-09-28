@@ -259,6 +259,14 @@ trailing space of ` * ', is measured as if it held all of PREFIX."
     (goto-char end)
     (pos-bol)))
 
+(defsubst fancy-fill-paragraph--closer-line-bol (beg end)
+  "Return the beginning of the closer line of the region BEG..END, or nil.
+BEG and END are the full region bounds.  A closer on the opener line is
+never on a line of its own, so nil is returned for it."
+  (declare (important-return-value t))
+  (let ((last-bol (fancy-fill-paragraph--last-bol end)))
+    (and (> last-bol beg) last-bol)))
+
 (defsubst fancy-fill-paragraph--range-has-non-blank-p (beg end)
   "Return non-nil when BEG..END holds a character that is not blank-space.
 Newlines count as blank-space.  An empty or reversed range holds
@@ -383,16 +391,20 @@ already sits on the line, so it probes the same syntax region."
   "Return the comment or string start position for POS, or nil.
 Probes `syntax-ppss' at POS and, when that yields nothing, at
 POS+1 so that a cursor directly on a comment-start character
-\(e.g. `#') or string delimiter is still detected."
+\(e.g. `#') or string delimiter is still detected.
+The quotes ending a triple-quoted string belong to that string, see
+`fancy-fill-paragraph--string-end'."
   (declare (important-return-value t))
   (save-excursion
-    (or (ppss-comment-or-string-start (syntax-ppss pos))
-        (cond
-         ((< pos (point-max))
-          (let ((beg (ppss-comment-or-string-start (syntax-ppss (1+ pos)))))
-            (and beg (<= beg pos) beg)))
-         (t
-          nil)))))
+    (let ((start
+           (or (ppss-comment-or-string-start (syntax-ppss pos))
+               (cond
+                ((< pos (point-max))
+                 (let ((beg (ppss-comment-or-string-start (syntax-ppss (1+ pos)))))
+                   (and beg (<= beg pos) beg)))
+                (t
+                 nil)))))
+      (or (and start (fancy-fill-paragraph--string-fence-closer-owner start)) start))))
 
 (defsubst fancy-fill-paragraph--syntax-string-delimiter-p (syn-descriptor)
   "Return non-nil if SYN-DESCRIPTOR is a string delimiter.
@@ -402,6 +414,73 @@ SYN-DESCRIPTOR may be nil, in which case nil is returned."
        ;; Class 7: string-quote (e.g. \" in C).
        ;; Class 15: string-fence (used by `python-mode' for triple-quoted strings).
        (memq (syntax-class syn-descriptor) '(7 15))))
+
+(defconst fancy-fill-paragraph--string-delimiter-syntax "\"|"
+  "The string delimiter syntax classes, for `skip-syntax-forward'.
+String quote and string fence, as for
+`fancy-fill-paragraph--syntax-string-delimiter-p', so a backtick counts
+as much as a double quote.")
+
+(defsubst fancy-fill-paragraph--syntax-string-fence-p (syn-descriptor)
+  "Return non-nil if SYN-DESCRIPTOR is a string fence (class 15).
+SYN-DESCRIPTOR may be nil, in which case nil is returned."
+  (declare (important-return-value t))
+  (eq 15 (syntax-class syn-descriptor)))
+
+(defun fancy-fill-paragraph--sexp-end (pos)
+  "Return the end of the sexp at POS, or nil when it never closes."
+  (declare (important-return-value t))
+  (condition-case nil
+      (scan-sexps pos 1)
+    (scan-error
+     nil)))
+
+(defun fancy-fill-paragraph--empty-string-at-p (pos)
+  "Return non-nil when POS opens an empty string, two delimiters in a row."
+  (declare (important-return-value t))
+  (and (fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after pos))
+       (eq (+ pos 2) (fancy-fill-paragraph--sexp-end pos))))
+
+(defun fancy-fill-paragraph--string-end (opener-pos)
+  "Return the position after the closer of the string opening at OPENER-POS.
+Returns nil when the string never closes.
+
+NOTE: `python-mode' gives string fence syntax to the first quote of a
+closing triple quote, ending the string there.  The two quotes after it
+then read as an empty string of their own, taken for a separate region
+to fill or for code following the closer.  Include them in the closer."
+  (declare (important-return-value t))
+  (let ((end (fancy-fill-paragraph--sexp-end opener-pos)))
+    (cond
+     ((and end
+           (fancy-fill-paragraph--syntax-string-fence-p (syntax-after (1- end)))
+           (fancy-fill-paragraph--empty-string-at-p end))
+      (+ end 2))
+     (t
+      end))))
+
+(defun fancy-fill-paragraph--string-fence-closer-owner (pos)
+  "Return the start of the string whose closer holds the empty string at POS.
+Returns nil when POS does not open the two quotes after the fence
+closing a triple-quoted string, see `fancy-fill-paragraph--string-end'."
+  (declare (important-return-value t))
+  (let* ((ppss (and (> pos (point-min)) (syntax-ppss (1- pos))))
+         ;; Only a string owns them.  A comment ending just before POS (a
+         ;; shebang line above a module doc-string for e.g.) is skipped by
+         ;; the scan for its end, which then ends past the quotes too.
+         (owner (and (nth 3 ppss) (nth 8 ppss))))
+    (and owner (eq (+ pos 2) (fancy-fill-paragraph--string-end owner)) owner)))
+
+(defun fancy-fill-paragraph--string-fence-opener-start (pos)
+  "Return the start of the string whose opener holds the empty string at POS.
+Returns nil when POS does not open the two quotes before the fence
+opening a triple-quoted string.  Like the closer, `python-mode' gives
+fence syntax to one quote of the opener, its last, so the two before
+it read as an empty string of their own."
+  (declare (important-return-value t))
+  (and (fancy-fill-paragraph--syntax-string-fence-p (syntax-after (+ pos 2)))
+       (fancy-fill-paragraph--empty-string-at-p pos)
+       (+ pos 2)))
 
 (defsubst fancy-fill-paragraph--syntax-comment-end-class-p (syn-descriptor)
   "Return non-nil if SYN-DESCRIPTOR indicates a `comment-end' character.
@@ -1107,6 +1186,12 @@ When SEL-BOUNDS is non-nil, include its bounds so only overlapping
 paragraphs are filled by the job runner.
 SEARCH-BOUNDS limits line-comment block expansion."
   (declare (important-return-value t))
+  ;; The quotes before a triple quote's fence open the string after them.
+  ;; NOTE: mapped here rather than in
+  ;; `fancy-fill-paragraph--comment-or-string-start-at' (as the closer's
+  ;; quotes are), which returns a start at or before its position.  This
+  ;; start follows it, the region scan would take the quotes for code.
+  (setq syn-start (or (fancy-fill-paragraph--string-fence-opener-start syn-start) syn-start))
   (save-excursion
     (goto-char syn-start)
     (let ((region-beg (pos-bol))
@@ -1138,21 +1223,19 @@ SEARCH-BOUNDS limits line-comment block expansion."
            :fill-fn #'fancy-fill-paragraph--fill-line-comment-region
            :args (list sel-beg sel-end)
            :resume (1+ (cdr bounds)))))
-       ;; String: advance past closer via forward-sexp.
+       ;; String: advance past closer, an unclosed string has no job.
        ((progn
           (goto-char syn-start)
           (fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after (point))))
-        (condition-case nil
-            (progn
-              (forward-sexp 1)
-              (fancy-fill-paragraph--syntax-fill-job-create
-               :beg region-beg
-               :end (pos-eol)
-               :fill-fn #'fancy-fill-paragraph--fill-string-region
-               :args (list syn-start sel-beg sel-end)
-               :resume (point)))
-          (scan-error
-           nil)))
+        (let ((string-end (fancy-fill-paragraph--string-end syn-start)))
+          (when string-end
+            (goto-char string-end)
+            (fancy-fill-paragraph--syntax-fill-job-create
+             :beg region-beg
+             :end (pos-eol)
+             :fill-fn #'fancy-fill-paragraph--fill-string-region
+             :args (list syn-start sel-beg sel-end)
+             :resume (point)))))
        (t
         nil)))))
 
@@ -1241,14 +1324,9 @@ string are told apart by KIND alone."
      ((forward-comment 1)
       (cons 'comment (point)))
      ((fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after syn-start))
-      ;; `scan-sexps' reports the position without moving point, which
-      ;; `forward-comment' above has already disturbed.
-      (cons
-       'string
-       (condition-case nil
-           (scan-sexps syn-start 1)
-         (scan-error
-          nil))))
+      ;; `fancy-fill-paragraph--string-end' reports the position without
+      ;; moving point, which `forward-comment' above has already disturbed.
+      (cons 'string (fancy-fill-paragraph--string-end syn-start)))
      (t
       ;; `forward-comment' fails on a comment that is never closed.
       (cons 'comment nil)))))
@@ -1558,7 +1636,16 @@ blank-space string."
     (buffer-substring-no-properties (pos-bol) (point))))
 
 (defun fancy-fill-paragraph--fill-multiline-syntax-body
-    (beg inner-body cont-prefix opener-prefix opener-text para-fill-fn sel-beg sel-end)
+    (beg
+     inner-body
+     cont-prefix
+     opener-prefix
+     opener-text
+     para-fill-fn
+     sel-beg
+     sel-end
+     &optional
+     closer-line-end)
   "Fill paragraphs in a multi-line syntax region, merging opener text.
 BEG is `pos-bol' of the opener line.  INNER-BODY is (BODY-BEG . BODY-END)
 for the lines between opener and closer.  CONT-PREFIX is the continuation
@@ -1569,19 +1656,25 @@ PARA-FILL-FN is called as (PARA-FILL-FN PARA-BEG PARA-END) for each
 non-opener paragraph.  SEL-BEG and SEL-END restrict filling to
 overlapping paragraphs (callers should default to point when not
 region-restricted).
+CLOSER-LINE-END, when non-nil, is the end of a closer line carrying
+text, which then joins the last paragraph.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
   (let* ((prefix-col (fancy-fill-paragraph--prefix-column-width (car inner-body) cont-prefix))
          ;; Widen body to include the opener line when it carries text,
          ;; so paragraph detection sees it as part of the first paragraph.
-         (scan-body
+         ;; The closer line is taken in likewise, as the inline fill does,
+         ;; otherwise filling a comment once it wraps past two lines drops
+         ;; its last line from the paragraph and breaks the rest again.
+         (scan-beg
           (cond
            (opener-text
-            (cons beg (cdr inner-body)))
+            beg)
            (t
-            inner-body))))
+            (car inner-body))))
+         (scan-end (or closer-line-end (cdr inner-body))))
     (fancy-fill-paragraph--fill-body-paragraphs
-     (car scan-body) (cdr scan-body) prefix-col sel-beg sel-end
+     scan-beg scan-end prefix-col sel-beg sel-end
      (lambda (para-beg para-end)
        (cond
         ;; First paragraph includes the opener line: merge opener
@@ -1634,29 +1727,35 @@ The plist contains:
     (nconc (list :content-col (current-column)) (fancy-fill-paragraph--opener-prefix-and-text))))
 
 (defun fancy-fill-paragraph--block-comment-inline-closer (beg end prefix-col)
-  "Return the verbatim closer line for an inline block comment, or nil."
+  "Return the start of the closer line of the block comment in BEG..END, or nil.
+It is returned when the line is no wider than PREFIX-COL, the width of
+the continuation prefix (e.g. ` */' beside ` * '), so it is kept as it
+is rather than filled."
   (declare (important-return-value t))
-  (let ((last-bol (fancy-fill-paragraph--last-bol end)))
-    (save-excursion
-      (goto-char last-bol)
-      (and (> last-bol beg)
-           (<= (- (pos-eol) last-bol) prefix-col)
-           (buffer-substring-no-properties last-bol (pos-eol))))))
+  (let ((closer-bol (fancy-fill-paragraph--closer-line-bol beg end)))
+    (and closer-bol
+         (save-excursion
+           (goto-char closer-bol)
+           (<= (- (pos-eol) closer-bol) prefix-col))
+         closer-bol)))
+
+(defun fancy-fill-paragraph--block-comment-prefixed-closer-p (beg end cont-prefix)
+  "Return non-nil when the closer line of the comment in BEG..END has CONT-PREFIX.
+Such a line (e.g. ` * text */') is laid out as the body lines are."
+  (declare (important-return-value t))
+  (let ((closer-bol (fancy-fill-paragraph--closer-line-bol beg end)))
+    (and closer-bol
+         (string-prefix-p cont-prefix (buffer-substring-no-properties closer-bol end)))))
 
 (defun fancy-fill-paragraph--block-comment-inline-lines
-    (beg end opener-col prefix-col cont-prefix last-line-verbatim)
+    (beg end opener-col prefix-col cont-prefix verbatim-closer-bol)
   "Return inline block comment content lines stripped for filling.
 BEG and END are the full region bounds.  OPENER-COL is used for the
-first line, PREFIX-COL for continuation lines carrying CONT-PREFIX, and
-LAST-LINE-VERBATIM, when non-nil, is excluded from the returned content."
+first line, PREFIX-COL for continuation lines carrying CONT-PREFIX.
+VERBATIM-CLOSER-BOL, when non-nil, starts the closer line, which is
+excluded from the returned content."
   (declare (important-return-value t))
-  (let* ((last-bol (fancy-fill-paragraph--last-bol end))
-         (content-end-bol
-          (cond
-           (last-line-verbatim
-            last-bol)
-           (t
-            (1+ last-bol)))))
+  (let ((content-end-bol (or verbatim-closer-bol (1+ (fancy-fill-paragraph--last-bol end)))))
     (save-excursion
       (goto-char beg)
       (move-to-column opener-col)
@@ -1682,16 +1781,16 @@ OPENER-COL is the column where content begins after the opener delimiter."
             (goto-char beg)
             (move-to-column opener-col)
             (buffer-substring-no-properties beg (point))))
-         (last-line-verbatim
+         (verbatim-closer-bol
           (fancy-fill-paragraph--block-comment-inline-closer beg end prefix-col)))
     ;; A verbatim closer line is left in place, the fill ends before it.
     (fancy-fill-paragraph--fill-prefixed-paragraph
      (fancy-fill-paragraph--block-comment-inline-lines
-      beg end opener-col prefix-col cont-prefix last-line-verbatim)
+      beg end opener-col prefix-col cont-prefix verbatim-closer-bol)
      beg
      (cond
-      (last-line-verbatim
-       (1- (fancy-fill-paragraph--last-bol end)))
+      (verbatim-closer-bol
+       (1- verbatim-closer-bol))
       (t
        end))
      cont-prefix
@@ -1704,10 +1803,15 @@ OPENER-COL is the column where content begins after the opener delimiter."
 COMMENT-START-POS is the buffer position of the comment opener.
 When SEL-BEG and SEL-END are non-nil, fill only body paragraphs
 overlapping that selection.  Otherwise fill the paragraph at point.
-When the opener and closer occupy their own lines, fills only the body
-lines between them.  When they share lines with body text (inline),
-temporarily transforms the opener so all lines share the continuation
-prefix, fills, then restores the opener."
+When lines lie between the opener and closer lines, fills body
+paragraphs, text on the opener line joining the first.  Otherwise the
+comment is inline and fills as one paragraph, the opener line keeping
+its opener as prefix and later lines taking the continuation prefix.
+Either way a closer line no wider than the continuation prefix, such
+as ` */', stays as it is, and code after the closer is never reflowed.
+Other text on the closer line joins the last paragraph, for body
+paragraphs only when the line starts with the continuation prefix
+\(e.g. ` * text */')."
   (let ((pos (point)))
     (save-excursion
       (comment-normalize-vars)
@@ -1719,7 +1823,15 @@ prefix, fills, then restores the opener."
              (inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
              (cont-prefix
               (fancy-fill-paragraph--block-comment-continuation-prefix
-               beg inner-body opener-col comment-start-pos)))
+               beg inner-body opener-col comment-start-pos))
+             (closer-end
+              (save-excursion
+                (goto-char comment-start-pos)
+                (forward-comment 1)
+                (point)))
+             ;; Code after the closer shares the region; reflowing it
+             ;; as comment text would corrupt it.
+             (closer-blocked (fancy-fill-paragraph--code-after-closer-p closer-end)))
         (fancy-fill-paragraph--fill-syntax-region
          beg end inner-body
          (lambda ()
@@ -1732,25 +1844,22 @@ prefix, fills, then restores the opener."
             (lambda (para-beg para-end)
               (fancy-fill-paragraph--fill-block-comment-body para-beg para-end cont-prefix))
             (or sel-beg pos)
-            (or sel-end pos)))
+            (or sel-end pos)
+            ;; Only a closer line laid out as the body is joins the last paragraph.
+            ;; NOTE: the body is filled by stripping the prefix width from each
+            ;; line, a closer line of another shape (e.g. `  */' or ` **/') would
+            ;; be cut into, dropping text or leaving the comment unclosed.
+            ;; So such a line is kept as it is.
+            (and (not closer-blocked)
+                 (fancy-fill-paragraph--block-comment-prefixed-closer-p beg end cont-prefix)
+                 end)))
          (lambda ()
-           (let ((closer-end
-                  (save-excursion
-                    (goto-char comment-start-pos)
-                    (forward-comment 1)
-                    (point))))
-             (cond
-              ;; Code after the closer shares the region; reflowing it
-              ;; as comment text would corrupt it.
-              ((fancy-fill-paragraph--code-after-closer-p closer-end)
-               nil)
-              (t
-               (fancy-fill-paragraph--fill-block-comment-inline
-                beg
-                end
-                comment-start-pos
-                cont-prefix
-                (plist-get opener-info :content-col)))))))))))
+           (cond
+            (closer-blocked
+             nil)
+            (t
+             (fancy-fill-paragraph--fill-block-comment-inline
+              beg end comment-start-pos cont-prefix (plist-get opener-info :content-col))))))))))
 
 (defun fancy-fill-paragraph--string-opener-info (opener-pos)
   "Return a plist describing the string opener at OPENER-POS.
@@ -1788,14 +1897,23 @@ overlapping that selection.  Otherwise fill the paragraph at point.
 When the delimiters occupy their own lines, fills only the body text
 between them.  When the delimiters share lines with body text (inline
 delimiters), fills the entire region, treating the delimiters as part
-of the text."
+of the text.  Either way a closer on a line of its own stays there,
+while text on the closer line joins the last paragraph."
   (let* ((inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
          (opener-info
           (when inner-body
             (fancy-fill-paragraph--string-opener-info opener-pos)))
          (cont-prefix
           (when (and inner-body (plist-get opener-info :text))
-            (fancy-fill-paragraph--string-continuation-prefix inner-body))))
+            (fancy-fill-paragraph--string-continuation-prefix inner-body)))
+         (closer-end (fancy-fill-paragraph--string-end opener-pos))
+         ;; Code after the closer shares the region; reflowing it as
+         ;; string text would corrupt it.  A string that never closes
+         ;; has no closer to locate, treat it the same way.
+         (closer-blocked
+          (or (null closer-end) (fancy-fill-paragraph--code-after-closer-p closer-end)))
+         ;; A closer on its own line stays there in both fills below.
+         (closer-alone-bol (fancy-fill-paragraph--string-closer-alone-bol beg end)))
     (fancy-fill-paragraph--fill-syntax-region
      beg end inner-body
      (lambda ()
@@ -1807,24 +1925,31 @@ of the text."
         (plist-get opener-info :text)
         #'fancy-fill-paragraph--fill-region
         (or sel-beg (point))
-        (or sel-end (point))))
+        (or sel-end (point))
+        (and (not closer-blocked) (not closer-alone-bol) end)))
      (lambda ()
-       (let ((closer-end
-              (condition-case nil
-                  (save-excursion
-                    (goto-char opener-pos)
-                    (forward-sexp 1)
-                    (point))
-                (scan-error
-                 nil))))
-         (cond
-          ;; Code after the closer shares the region; reflowing it as
-          ;; string text would corrupt it.  A scan error means the
-          ;; closer cannot be located; skip the fill in both cases.
-          ((or (null closer-end) (fancy-fill-paragraph--code-after-closer-p closer-end))
-           nil)
-          (t
-           (fancy-fill-paragraph--fill-region beg end))))))))
+       (cond
+        (closer-blocked
+         nil)
+        (closer-alone-bol
+         (fancy-fill-paragraph--fill-region beg (1- closer-alone-bol)))
+        (t
+         (fancy-fill-paragraph--fill-region beg end)))))))
+
+(defun fancy-fill-paragraph--string-closer-alone-bol (beg end)
+  "Return the start of the closer line of the string in BEG..END, or nil.
+It is returned when the string ends on a line of its own, holding only
+blank-space and the closing delimiter."
+  (declare (important-return-value t))
+  (let ((closer-bol (fancy-fill-paragraph--closer-line-bol beg end)))
+    (and closer-bol
+         (save-excursion
+           (goto-char closer-bol)
+           (skip-chars-forward " \t" end)
+           (skip-syntax-forward fancy-fill-paragraph--string-delimiter-syntax end)
+           (skip-chars-forward " \t" end)
+           (= (point) end))
+         closer-bol)))
 
 (defun fancy-fill-paragraph--replace-region (beg end result)
   "Replace the region BEG..END with RESULT when it differs.

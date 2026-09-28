@@ -35,11 +35,22 @@
        (buffer-reset-text ,initial-buffer-text)
        ,@body)))
 
+(defun should-fill-again-unchanged ()
+  "Fill again from point, expecting the buffer and point to stay as they are.
+Call after a fill, point having followed its text, so it is still
+within the paragraph just filled."
+  (let ((text-once (buffer-string))
+        (point-once (point)))
+    (fancy-fill-paragraph)
+    (should (equal text-once (buffer-string)))
+    (should (equal point-once (point)))))
+
 (defun should-fill-same-from-every-position (text-initial line-index text-expected)
   "Fill TEXT-INITIAL from every position on LINE-INDEX, expecting TEXT-EXPECTED.
 Filling behaves as if the cursor were at the last non-blank character
 of its line, so where point sits on it must never change the result.
 Positions are stepped rather than columns, so a tab counts once.
+A second fill must leave the result as it is.
 Call inside a buffer whose major mode is already set."
   (buffer-reset-text text-initial)
   (goto-char (point-min))
@@ -50,20 +61,25 @@ Call inside a buffer whose major mode is already set."
       (buffer-reset-text text-initial)
       (goto-char (+ line-beg offset))
       (fancy-fill-paragraph)
-      (should (equal text-expected (buffer-string))))))
+      (should (equal text-expected (buffer-string)))
+      (should-fill-again-unchanged))))
 
 (defun should-fill-keep-point (text-initial text-expected)
   "Fill TEXT-INITIAL at its `|', expecting TEXT-EXPECTED with `|' at point.
 The `|' marks the cursor and is removed before filling, so point must
 stay with the text beside it rather than keep its buffer offset.
+A second fill must leave the result as it is.
 Call inside a buffer whose major mode is already set."
   (buffer-reset-text text-initial)
   (goto-char (point-min))
   (search-forward "|")
   (delete-char -1)
   (fancy-fill-paragraph)
+  ;; Check the result before filling again, so a wrong fill reports as such.
   (insert "|")
-  (should (equal text-expected (buffer-string))))
+  (should (equal text-expected (buffer-string)))
+  (delete-char -1)
+  (should-fill-again-unchanged))
 
 (defmacro with-advice (advice &rest body)
   "Execute BODY with ADVICE temporarily enabled.
@@ -766,7 +782,7 @@ carries the prefix may be cut."
 
 (ert-deftest fill-syntax-bounds-block-comment-rule-line-survives-refill ()
   "Repeated fills must not shorten a rule line, from any cursor position.
-The layout settles over two passes, the text itself must never change."
+Nor may they change the layout, the first fill settles it."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 40)
         (sentence-end-double-space nil)
@@ -780,9 +796,13 @@ The layout settles over two passes, the text itself must never change."
         ;; every position rather than resting on `point-min'.
         (dotimes (offset (length text-initial))
           (buffer-reset-text text-initial)
-          (dotimes (_ 3)
-            (goto-char (min (+ (point-min) offset) (point-max)))
-            (fancy-fill-paragraph))
+          (goto-char (min (+ (point-min) offset) (point-max)))
+          (fancy-fill-paragraph)
+          (let ((text-once (buffer-string)))
+            (dotimes (_ 2)
+              (goto-char (min (+ (point-min) offset) (point-max)))
+              (fancy-fill-paragraph)
+              (should (equal text-once (buffer-string)))))
           (should (equal 20 (length (replace-regexp-in-string "[^-]" "" (buffer-string))))))))))
 
 (ert-deftest fill-syntax-bounds-block-comment-body-rule-line-keeps-text ()
@@ -1485,6 +1505,90 @@ an unclosed comment from an unclosed string."
       (buffer-reset-text "echo 'closed' x")
       (syntax-propertize (point-max))
       (should (equal '(string . 14) (fancy-fill-paragraph--syntax-region-at 6))))))
+
+(ert-deftest string-end-includes-triple-quote-closer ()
+  "A triple-quoted string ends after all three closing quotes.
+`python-mode' ends the string at the first closing quote, the two after
+it read as an empty string.  Both such pairs belong to the string, while
+a real empty string stays apart, after a closed string or before code."
+  (with-temp-buffer
+    (python-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "\"\"\"aaa\"\"\" x")
+      (syntax-propertize (point-max))
+      (goto-char (point-min))
+      (search-forward "aaa")
+      (let* ((text-beg (match-beginning 0))
+             ;; The string opens at its last opening quote.
+             (opener (1- text-beg))
+             (closer-beg (match-end 0))
+             (string-end (+ closer-beg 3)))
+        (should (equal opener (fancy-fill-paragraph--comment-or-string-start-at (1+ text-beg))))
+        (should (equal string-end (fancy-fill-paragraph--string-end opener)))
+        (should (equal (cons 'string string-end) (fancy-fill-paragraph--syntax-region-at opener)))
+        (should (equal opener (fancy-fill-paragraph--string-fence-opener-start (point-min))))
+        (should (equal opener (fancy-fill-paragraph--string-fence-closer-owner (1+ closer-beg))))
+        ;; A cursor on the closing quotes is in the string they close.
+        (should
+         (equal opener (fancy-fill-paragraph--comment-or-string-start-at (+ closer-beg 2)))))))
+  (with-temp-buffer
+    (c-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "\"aaa\"\"\"; x")
+      (syntax-propertize (point-max))
+      (goto-char (point-min))
+      (search-forward "aaa")
+      ;; The empty string after the closing quote is a string of its own.
+      (let ((empty-beg (1+ (match-end 0))))
+        (should (equal empty-beg (fancy-fill-paragraph--string-end (point-min))))
+        (should-not (fancy-fill-paragraph--string-fence-closer-owner empty-beg))
+        (should-not (fancy-fill-paragraph--string-fence-opener-start (point-min))))))
+  (with-temp-buffer
+    (python-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "x = \"\" + y")
+      (syntax-propertize (point-max))
+      (goto-char (point-min))
+      (search-forward "\"")
+      ;; The empty string before code opens no string after it.
+      (let ((empty-beg (match-beginning 0)))
+        (should (equal (+ empty-beg 2) (fancy-fill-paragraph--string-end empty-beg)))
+        (should-not (fancy-fill-paragraph--string-fence-opener-start empty-beg))))))
+
+(ert-deftest string-fence-closer-owner-not-a-comment ()
+  "The quotes opening a triple-quoted string below a comment aren't its closer.
+The comment was taken to own them, scanning for its end skips it and
+ends past the quotes."
+  (with-temp-buffer
+    (python-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "# Aaa.\n\"\"\"Bbb.\n\"\"\"\n")
+      (syntax-propertize (point-max))
+      (should-not (fancy-fill-paragraph--string-fence-closer-owner 8)))))
+
+(ert-deftest syntax-fill-jobs-in-range-one-job-per-docstring ()
+  "A docstring whose closer shares a line with text is one job.
+The quotes after the closing fence once made a second job, filling the
+closer line on its own before the docstring was filled over it."
+  (with-temp-buffer
+    (python-mode)
+    (let ((inhibit-message t)
+          (fancy-fill-paragraph-syntax-bounds t))
+      (buffer-reset-text
+       ;; format-next-line: off
+       (concat "def f():\n"
+               "    \"\"\"aaa bbb\n"
+               "    ccc ddd.\"\"\"\n"))
+      (syntax-propertize (point-max))
+      (goto-char (point-min))
+      (forward-line 1)
+      (let* ((docstring-end (pos-eol 2))
+             (jobs
+              (fancy-fill-paragraph--syntax-fill-jobs-in-range (pos-bol) docstring-end (pos-eol))))
+        (should (equal 1 (length jobs)))
+        ;; Scanning resumes past the closing quotes, which end the line.
+        (should
+         (equal docstring-end (fancy-fill-paragraph--syntax-fill-job-resume (car jobs))))))))
 
 (ert-deftest fill-syntax-bounds-option-off-code-beside-comment-fills ()
   "With `fancy-fill-paragraph-syntax-bounds' nil, code beside a comment fills.
@@ -3209,9 +3313,289 @@ keep point with its text."
 
 
 ;; ---------------------------------------------------------------------------
-;; Refill Stability Tests
+;; Comment and String Layout Tests
 ;;
-;; Filling a second time must never change the result.
+;; Line widths, openers and closers of comments and strings.  Each fill
+;; goes through a helper that fills again, which must change nothing.
+
+(ert-deftest fill-syntax-bounds-c-mode-inline-comment-refill-unchanged ()
+  "An inline block comment wrapped past two lines stays as filled.
+The filled comment is no longer inline, the refill once left its closer
+line out of the paragraph and broke the rest again."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 28)
+        (sentence-end-double-space nil)
+        (text-initial
+         "  /* aaa bbbb cccccccc, dddd eeeee ffffff ggg hhh iiiii j, kk llll mmmmmmm nn */\n")
+        (text-expected
+         ;; format-next-line: off
+         (concat "  /* aaa bbbb cccccccc,\n"
+                 "   * dddd eeeee ffffff\n"
+                 "   * ggg hhh iiiii j,\n"
+                 "   * kk llll mmmmmmm nn */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-c-mode-inline-comment-beside-code-refill-unchanged ()
+  "An inline block comment beside code wrapped past two lines stays as filled."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 24)
+        (sentence-end-double-space nil)
+        (text-initial "int x = 1; /* aaaaaaaa bb ccccc d eee, ffffff. */\n")
+        (text-expected
+         ;; format-next-line: off
+         (concat "int x = 1; /* aaaaaaaa\n"
+                 "            * bb ccccc\n"
+                 "            * d eee,\n"
+                 "            * ffffff. */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-html-inline-comment-refill-unchanged ()
+  "An inline XML comment wrapped past two lines stays as filled.
+Only that is checked, not the continuation prefix XML comments take."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 28)
+        (sentence-end-double-space nil)
+        (text-initial "<!-- aaa bb cc ddddd eeeeee ffff ggg, hhh ii jjj -->\n"))
+    (with-temp-buffer
+      (html-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (goto-char (point-min))
+        (fancy-fill-paragraph)
+        ;; Past two lines, the second fill takes the multi-line path.
+        (should (< 2 (count-lines (point-min) (point-max))))
+        (should-fill-again-unchanged)))))
+
+(ert-deftest fill-syntax-bounds-python-module-docstring-refill-unchanged ()
+  "A one-line module docstring wrapped past two lines stays as filled."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial "\"\"\"Alpha bravo charlie delta echo foxtrot golf.\"\"\"\n")
+        (text-expected
+         ;; format-next-line: off
+         (concat "\"\"\"Alpha bravo\n"
+                 "charlie delta echo\n"
+                 "foxtrot golf.\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-python-inline-docstring-refill-unchanged ()
+  "A one-line docstring wrapped past two lines stays as filled."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"aaa. bbbbbbbb. cccc\"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"aaa.\n"
+                 "    bbbbbbbb.\n"
+                 "    cccc\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-closer-text-joins-last-paragraph ()
+  "Text on a closer line fills with the paragraph it ends.
+Only the paragraph at point fills.  With point in the first paragraph,
+the closer line is left as it is."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 24)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "/* Aaa bbb ccc ddd eee fff ggg.\n"
+                 " *\n"
+                 " * Hhh iii jjj kkk lll mmm nnn. */\n"))
+        (text-expected-last
+         ;; format-next-line: off
+         (concat "/* Aaa bbb ccc ddd eee fff ggg.\n"
+                 " *\n"
+                 " * Hhh iii jjj kkk lll\n"
+                 " * mmm nnn. */\n"))
+        (text-expected-first
+         ;; format-next-line: off
+         (concat "/* Aaa bbb ccc ddd eee\n"
+                 " * fff ggg.\n"
+                 " *\n"
+                 " * Hhh iii jjj kkk lll mmm nnn. */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 2 text-expected-last)
+        (should-fill-same-from-every-position text-initial 0 text-expected-first)))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-closer-alone-stays ()
+  "Closing quotes on a line of their own are not joined to the text.
+Filling may shrink the docstring to two lines, after which it fills as
+inline text.  The closer must stay on its own line in both cases, blank
+space after it included."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Alpha bravo\n"
+                 "    charlie.\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Alpha bravo charlie.\n"
+                 "    \"\"\"\n"))
+        ;; The same docstring with blank space after the closer.
+        (text-initial-spaced
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Alpha bravo\n"
+                 "    charlie.\n"
+                 "    \"\"\" \t\n"))
+        (text-expected-spaced
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Alpha bravo charlie.\n"
+                 "    \"\"\" \t\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        ;; Already two lines, as the first fill leaves it.
+        (should-fill-same-from-every-position text-expected 1 text-expected)
+        (should-fill-same-from-every-position text-initial-spaced 1 text-expected-spaced)
+        (should-fill-same-from-every-position text-expected-spaced 1 text-expected-spaced)))))
+
+(ert-deftest fill-syntax-bounds-js-template-closer-alone-stays ()
+  "A backtick closing a template string on a line of its own stays there.
+Only quote characters were taken for a closer, so the backtick was read
+as text and joined to the last line."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "const s = `\n"
+                 "bbb ccc ddd eee fff ggg hhh iii jjj kkk\n"
+                 "lll\n"
+                 "`\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "const s = `\n"
+                 "bbb ccc ddd eee fff ggg hhh\n"
+                 "iii jjj kkk lll\n"
+                 "`\n"))
+        ;; The same string with blank space after the closer.
+        (text-initial-spaced
+         ;; format-next-line: off
+         (concat "const s = `\n"
+                 "bbb ccc ddd eee fff ggg hhh iii jjj kkk\n"
+                 "lll\n"
+                 "`  \n"))
+        (text-expected-spaced
+         ;; format-next-line: off
+         (concat "const s = `\n"
+                 "bbb ccc ddd eee fff ggg hhh\n"
+                 "iii jjj kkk lll\n"
+                 "`  \n")))
+    (with-temp-buffer
+      (js-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        (should-fill-same-from-every-position text-initial-spaced 1 text-expected-spaced)))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-cursor-on-closer-line ()
+  "A cursor on the closing quotes fills the docstring they close.
+The quotes after the closing fence read as an empty string, which was
+taken for the region at point instead."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 24)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"\n"
+                 "    Alpha bravo charlie delta echo foxtrot golf.\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"\n"
+                 "    Alpha bravo charlie\n"
+                 "    delta echo foxtrot\n"
+                 "    golf.\n"
+                 "    \"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 3 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-cursor-on-closer-line ()
+  "A cursor on a ` */' closer line fills the paragraph above it."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "/* aaa\n"
+                 " * bbb ccc ddd eee fff ggg hhh\n"
+                 " */\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc ddd\n"
+                 " * eee fff ggg hhh\n"
+                 " */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 2 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-closer-without-prefix-kept ()
+  "A closer line not starting with the continuation prefix is kept as it is.
+Filled as a body line, its prefix width would be stripped, cutting into
+a closer such as `  */' and leaving the comment unclosed."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (closer '("  */" "   */" "    */" " **/" "  more */"))
+          (dolist (opener '("/*" "/**"))
+            (should-fill-same-from-every-position
+             ;; format-next-line: off
+             (concat opener "\n"
+                     " * bbb ccc ddd eee fff ggg hhh\n"
+                     closer "\n")
+             1
+             ;; format-next-line: off
+             (concat opener "\n"
+                     " * bbb ccc ddd eee\n"
+                     " * fff ggg hhh\n"
+                     closer "\n")))
+          ;; Opener text takes another path, which must keep the line too.
+          (should-fill-same-from-every-position
+           ;; format-next-line: off
+           (concat "/* aaa\n"
+                   " * bbb ccc ddd eee fff ggg hhh\n"
+                   closer "\n")
+           1
+           ;; format-next-line: off
+           (concat "/* aaa bbb ccc ddd\n"
+                   " * eee fff ggg hhh\n"
+                   closer "\n")))))))
 
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-bare-separator-width ()
   "A bare ` *' separator line does not widen the paragraph above it.
