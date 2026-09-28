@@ -2479,12 +2479,14 @@ Returns non-nil when the buffer was modified."
      (jobs
       ;; Fill each region independently, in reverse order so
       ;; earlier positions remain valid after later fills.
-      ;; Save point as an integer since `replace-region-contents'
-      ;; can displace `save-excursion' markers inside fill functions.
-      (let ((saved-point (point))
-            (changed (fancy-fill-paragraph--syntax-fill-jobs-run jobs t)))
-        (goto-char saved-point)
-        changed))
+      ;; Track point with a marker so it follows its text as the fill
+      ;; inserts and removes line breaks before it, restored even when
+      ;; a fill fails.
+      (let ((saved-point (point-marker)))
+        (unwind-protect
+            (fancy-fill-paragraph--syntax-fill-jobs-run jobs t)
+          (goto-char saved-point)
+          (set-marker saved-point nil))))
      ;; Point is on code beside a comment or string, leave the buffer
      ;; alone rather than merge the code into it.
      ;;

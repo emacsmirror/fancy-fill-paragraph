@@ -52,6 +52,19 @@ Call inside a buffer whose major mode is already set."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(defun should-fill-keep-point (text-initial text-expected)
+  "Fill TEXT-INITIAL at its `|', expecting TEXT-EXPECTED with `|' at point.
+The `|' marks the cursor and is removed before filling, so point must
+stay with the text beside it rather than keep its buffer offset.
+Call inside a buffer whose major mode is already set."
+  (buffer-reset-text text-initial)
+  (goto-char (point-min))
+  (search-forward "|")
+  (delete-char -1)
+  (fancy-fill-paragraph)
+  (insert "|")
+  (should (equal text-expected (buffer-string))))
+
 (defmacro with-advice (advice &rest body)
   "Execute BODY with ADVICE temporarily enabled.
 
@@ -2951,6 +2964,201 @@ as one syntax region while the option is on."
     (with-fancy-fill-paragraph-test text-initial
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Point Placement Tests
+
+(ert-deftest fill-syntax-bounds-point-follows-text-line-comment ()
+  "Point stays in its word when a line comment wraps.
+Each wrap inserts a prefix before point, keeping the buffer offset
+left point lines away from the word it was in."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial "# aaa bbb ccc ddd eee fff ggg hhh iii jjj kk|k lll\n")
+        (text-expected
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd\n"
+                 "# eee fff ggg hhh\n"
+                 "# iii jjj kk|k lll\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-follows-text-block-comment ()
+  "Point stays in its word when a block comment wraps."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial "/* aaa bbb ccc ddd eee fff ggg hhh iii jjj kk|k */\n")
+        (text-expected
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc ddd\n"
+                 " * eee fff ggg hhh\n"
+                 " * iii jjj kk|k */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-follows-text-string ()
+  "Point stays in its word when a docstring wraps."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 24)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"aaa bbb ccc ddd eee fff ggg hhh iii jjj kk|k.\"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh iii\n"
+                 "    jjj kk|k.\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-follows-text-when-lines-join ()
+  "Point stays in its word when comment lines join.
+Joining removes prefixes before point, the inverse of a wrap."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "# aaa\n"
+                 "# bbb\n"
+                 "# ccc\n"
+                 "# dd|d\n"))
+        (text-expected "# aaa bbb ccc dd|d\n"))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-follows-text-in-later-job ()
+  "Point in the second of two comment blocks stays in its word.
+The blocks fill last to first, so the first block changes length after
+the second is filled, moving the text point is in."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd eee fff\n"
+                 "  # ggg hhh iii jjj kkk| lll\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd\n"
+                 "# eee fff\n"
+                 "  # ggg hhh iii jjj\n"
+                 "  # kkk| lll\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-before-inserted-line-break ()
+  "Point before a space that becomes a line break ends the first line."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial "# aaa bbb ccc ddd| eee fff ggg\n")
+        (text-expected
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd|\n"
+                 "# eee fff ggg\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-after-inserted-line-break ()
+  "Point after a space that becomes a line break starts the next line.
+Point lands after the continuation prefix, before the word it preceded."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial "# aaa bbb ccc ddd |eee fff ggg\n")
+        (text-expected
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd\n"
+                 "# |eee fff ggg\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-at-eob-follows-text ()
+  "Point at the end of a buffer without a trailing newline stays there."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial "# aaa bbb ccc ddd eee fff ggg|")
+        (text-expected
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd\n"
+                 "# eee fff ggg|")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-before-changes-untouched ()
+  "Point in the first of two comment blocks keeps its place.
+Only text after point changes, so point must not move."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "# aaa bbb| ccc ddd eee fff\n"
+                 "  # ggg hhh iii jjj kkk lll\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "# aaa bbb| ccc ddd\n"
+                 "# eee fff\n"
+                 "  # ggg hhh iii jjj\n"
+                 "  # kkk lll\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
+
+(ert-deftest fill-syntax-bounds-point-unchanged-comment-untouched ()
+  "Point in a comment that is already filled keeps its place."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd\n"
+                 "# ee|e fff ggg\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-initial)))))
+
+(ert-deftest fill-point-follows-text-prose ()
+  "Point stays in its word when plain text wraps.
+Plain text takes a separate path from comments and strings, both must
+keep point with its text."
+  (let ((fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial "aaa bbb ccc ddd eee fff ggg hhh iii jjj kk|k lll\n")
+        (text-expected
+         ;; format-next-line: off
+         (concat "aaa bbb ccc ddd eee\n"
+                 "fff ggg hhh iii jjj\n"
+                 "kk|k lll\n")))
+    (with-temp-buffer
+      (let ((inhibit-message t))
+        (should-fill-keep-point text-initial text-expected)))))
 
 
 ;; ---------------------------------------------------------------------------
