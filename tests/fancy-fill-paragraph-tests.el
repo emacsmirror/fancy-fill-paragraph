@@ -1566,6 +1566,42 @@ ends past the quotes."
       (syntax-propertize (point-max))
       (should-not (fancy-fill-paragraph--string-fence-closer-owner 8)))))
 
+(ert-deftest string-opener-info-splits-delimiter-from-text ()
+  "The opener prefix ends after one run of the opening delimiter.
+A quote directly after a backtick opener is text, although a quote is
+a string delimiter too.  String prefix letters and a triple quote stay
+in the prefix."
+  (with-temp-buffer
+    (js-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text
+       ;; format-next-line: off
+       (concat "`\"aaa\" bbb\n"
+               "ccc\n"
+               "`\n"))
+      (syntax-propertize (point-max))
+      (should
+       (equal
+        '(:prefix "`" :text "\"aaa\" bbb")
+        (fancy-fill-paragraph--string-opener-info (point-min))))))
+  (with-temp-buffer
+    (python-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text
+       ;; format-next-line: off
+       (concat "    r\"\"\"Alpha bravo\n"
+               "    charlie\n"
+               "    \"\"\"\n"))
+      (syntax-propertize (point-max))
+      (should
+       (equal
+        '(:prefix "    r\"\"\"" :text "Alpha bravo")
+        (fancy-fill-paragraph--string-opener-info
+         (fancy-fill-paragraph--comment-or-string-start-at
+          (progn
+            (goto-char (point-min))
+            (search-forward "Alpha")))))))))
+
 (ert-deftest syntax-fill-jobs-in-range-one-job-per-docstring ()
   "A docstring whose closer shares a line with text is one job.
 The quotes after the closing fence once made a second job, filling the
@@ -3515,6 +3551,42 @@ as text and joined to the last line."
       (let ((inhibit-message t))
         (should-fill-same-from-every-position text-initial 1 text-expected)
         (should-fill-same-from-every-position text-initial-spaced 1 text-expected-spaced)))))
+
+(ert-deftest fill-syntax-bounds-js-template-opener-text-fills ()
+  "Text after a backtick opening a template string fills with the body.
+Only quote characters were taken for an opener, so the opener line was
+left out of the paragraph, however long."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "const s = `aaa bbb ccc\n"
+                 "ddd eee fff ggg hhh iii jjj kkk\n"
+                 "lll\n"
+                 "`;\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "const s = `aaa bbb ccc ddd eee\n"
+                 "fff ggg hhh iii jjj kkk lll\n"
+                 "`;\n"))
+        ;; No code before the opener, its line longer than `fill-column'.
+        (text-initial-bare
+         ;; format-next-line: off
+         (concat "`aaa bbb ccc ddd eee fff ggg hhh\n"
+                 "iii jjj kkk lll mmm nnn ooo ppp\n"
+                 "`\n"))
+        (text-expected-bare
+         ;; format-next-line: off
+         (concat "`aaa bbb ccc ddd eee fff ggg\n"
+                 "hhh iii jjj kkk lll mmm nnn\n"
+                 "ooo ppp\n"
+                 "`\n")))
+    (with-temp-buffer
+      (js-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        (should-fill-same-from-every-position text-initial-bare 1 text-expected-bare)))))
 
 (ert-deftest fill-syntax-bounds-python-docstring-cursor-on-closer-line ()
   "A cursor on the closing quotes fills the docstring they close.

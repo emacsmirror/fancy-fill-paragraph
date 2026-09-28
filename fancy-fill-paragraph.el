@@ -1866,7 +1866,7 @@ paragraphs only when the line starts with the continuation prefix
 OPENER-POS is the syntax-derived position where the string sexp begins
 \(e.g. the `r' in `r\"\"\"' or the first quote in `\"\"\"').
 Normal callers provide a valid string opener; the fallback path
-\(no quote found on the line) is a defensive guard only.
+\(no delimiter found on the line) is a defensive guard only.
 The plist contains:
 - :prefix  Exact buffer text from `pos-bol' to the start of opener-line
            body content (indentation + any prefix chars + delimiter +
@@ -1876,15 +1876,15 @@ The plist contains:
   (declare (important-return-value t))
   (save-excursion
     (goto-char opener-pos)
-    ;; Skip to the first quote character, passing any string prefix
-    ;; letters (e.g. r, f, b, u, rb, fr in r""").
-    (skip-chars-forward "^'\"\n" (pos-eol))
+    ;; Skip to the first delimiter, passing any string prefix letters
+    ;; (e.g. r, f, b, u, rb, fr in r""").
+    (skip-syntax-forward (concat "^" fancy-fill-paragraph--string-delimiter-syntax) (pos-eol))
     (cond
      ((or (eolp) (eq (char-after) ?\n))
-      ;; Defensive fallback: no quote found on this line.
+      ;; Defensive fallback: no delimiter found on this line.
       (list :prefix (buffer-substring-no-properties (pos-bol) (pos-eol)) :text nil))
      (t
-      ;; Skip the quote characters (e.g. \"\"\", ''').
+      ;; Skip the delimiter characters (e.g. \"\"\", ''').
       (skip-chars-forward (string (char-after)) (pos-eol))
       (skip-chars-forward " \t" (pos-eol))
       (fancy-fill-paragraph--opener-prefix-and-text)))))
