@@ -1178,7 +1178,16 @@ overlapping that selection.  Otherwise fill the paragraph at point."
   (declare (important-return-value t))
   (save-excursion
     (goto-char syn-start)
-    (and (forward-comment 1) (not (fancy-fill-paragraph--syntax-comment-end-p)))))
+    (cond
+     ((forward-comment 1)
+      (not (fancy-fill-paragraph--syntax-comment-end-p)))
+     ;; A line comment ending the buffer without a newline never closes,
+     ;; `forward-comment' fails on it as it does on an unclosed block comment.
+     ((eobp)
+      (goto-char syn-start)
+      (fancy-fill-paragraph--line-comment-opener-at-point-p))
+     (t
+      nil))))
 
 (defun fancy-fill-paragraph--syntax-fill-job-at (syn-start &optional sel-bounds search-bounds)
   "Return a syntax fill job for the region starting at SYN-START.
@@ -1312,7 +1321,8 @@ Returns nil when no syntax boundaries are found, and when
 KIND is `comment' or `string'.  RESUME is where to resume scanning,
 past the closer and any blank-space following it, so it can sit past
 the region.  RESUME is nil when the region never closes, an apostrophe
-in shell text opens a string that runs to the end of the buffer.
+in shell text opens a string that runs to the end of the buffer.  The
+end of the buffer closes a line comment, as a newline would.
 Both parts are reported because an unclosed comment and an unclosed
 string are told apart by KIND alone."
   (declare (important-return-value t))
@@ -1328,25 +1338,31 @@ string are told apart by KIND alone."
       ;; moving point, which `forward-comment' above has already disturbed.
       (cons 'string (fancy-fill-paragraph--string-end syn-start)))
      (t
-      ;; `forward-comment' fails on a comment that is never closed.
-      (cons 'comment nil)))))
+      ;; `forward-comment' fails on a comment that is never closed, and
+      ;; on a line comment ending the buffer without a newline.
+      (cons
+       'comment
+       (and (fancy-fill-paragraph--line-comment-syntax-start-p syn-start) (point-max)))))))
 
-(defun fancy-fill-paragraph--range-code-beside-comment-or-string-p (beg end)
-  "Return non-nil when BEG..END holds code beside a comment or string.
-Filling such a range as prose merges the code into the comment or
-string text.  Code alone or a comment alone is safe to fill, so both
-must be present.  A string that never closes is not counted, an
-apostrophe in shell text opens one.  A comment counts either way, code
-beside one still being typed merges just the same.
-An empty or reversed range holds nothing."
+(defun fancy-fill-paragraph--range-syntax-regions (beg end &optional stop-early)
+  "Return the comments and strings in BEG..END, and whether code is beside them.
+The result is (STARTS . HAS-CODE).  STARTS lists where each comment and
+string starts, in order, the first may precede BEG when BEG is inside
+it.  HAS-CODE is non-nil when non-blank text lies outside them.
+A string that never closes is not counted, an apostrophe in shell text
+opens one.  A comment counts whether or not it closes.  An empty or
+reversed range holds nothing.
+When STOP-EARLY is non-nil the scan stops once a region and code are
+both found, for callers needing only to know whether they are, STARTS
+is then incomplete."
   (declare (important-return-value t))
   (save-excursion
     (syntax-propertize end)
     (let ((has-code nil)
-          (has-syn nil))
+          (starts nil))
       (goto-char beg)
       ;; An empty or reversed range never enters the loop.
-      (while (and (< (point) end) (not (and has-code has-syn)))
+      (while (and (< (point) end) (not (and stop-early starts has-code)))
         (let* ((from (point))
                (syn-start
                 (or
@@ -1369,37 +1385,109 @@ An empty or reversed range holds nothing."
               ;; only counts when it closes, an apostrophe in shell text
               ;; opens one that never does.
               (when (or (eq (car region) 'comment) resume)
-                (setq has-syn t))
+                (push syn-start starts))
               ;; An unclosed region runs to the end of the buffer.  A
               ;; closed one always resumes past FROM, which is inside it,
               ;; so the scan cannot retreat.
               (goto-char (or resume end))))
            (t
             (goto-char end)))))
-      (and has-code has-syn))))
+      (cons (nreverse starts) has-code))))
+
+(defun fancy-fill-paragraph--text-beside-regions-is-code-p ()
+  "Return non-nil when text beside comments and strings is code.
+This is limited to programming modes, `org-mode' and `conf-mode' set
+`comment-start' yet give a double quote string syntax, so quoted prose
+would otherwise be taken for code."
+  (declare (important-return-value t))
+  (derived-mode-p 'prog-mode))
+
+(defun fancy-fill-paragraph--refuse-regions-p (starts has-code)
+  "Return non-nil when a prose fill must be refused for STARTS and HAS-CODE.
+Both are from `fancy-fill-paragraph--range-syntax-regions'.  Code
+beside a comment or string would merge into its text, see
+`fancy-fill-paragraph--text-beside-regions-is-code-p'."
+  (declare (important-return-value t))
+  (and starts has-code (fancy-fill-paragraph--text-beside-regions-is-code-p) t))
 
 (defun fancy-fill-paragraph--fill-region-refuse-p (beg end)
   "Return non-nil when a prose fill of BEG..END must be refused.
-Such a fill merges code sharing the range into the comment or string
-text.  The check is limited to programming modes, `org-mode' and
-`conf-mode' set `comment-start' yet give a double quote string syntax,
-so quoted prose would otherwise stop filling.  Returns nil both where
-the range is safe and where the check does not apply."
+Returns nil both where the range is safe and where the check does not
+apply, see `fancy-fill-paragraph--refuse-regions-p'."
   (declare (important-return-value t))
   (and fancy-fill-paragraph-syntax-bounds
-       (derived-mode-p 'prog-mode)
-       (fancy-fill-paragraph--range-code-beside-comment-or-string-p beg end)))
+       (let ((regions (fancy-fill-paragraph--range-syntax-regions beg end t)))
+         (fancy-fill-paragraph--refuse-regions-p (car regions) (cdr regions)))))
 
-(defun fancy-fill-paragraph--drop-refused-paragraphs (bounds)
-  "Return BOUNDS without the paragraphs a prose fill is refused for.
-See `fancy-fill-paragraph--fill-region-refuse-p' for what is refused.
-Ordering is preserved, so callers still fill later paragraphs first."
-  (declare (important-return-value t))
-  (let ((result nil))
-    (dolist (para-bounds bounds)
-      (unless (fancy-fill-paragraph--fill-region-refuse-p (car para-bounds) (cdr para-bounds))
-        (push para-bounds result)))
-    (nreverse result)))
+(defun fancy-fill-paragraph--fill-selection-paragraphs (beg end)
+  "Fill each paragraph of the selection BEG..END.
+A paragraph holding only comments and strings fills them with their own
+fillers, restricted to the selection, as the cursor path would.  Other
+paragraphs fill as prose, except those holding code beside a comment or
+string, which are left alone, as are the comments and strings they
+open.  A comment that never closes is left alone too.  The line a
+comment or string closes on fills with it, not as prose.  Outside
+programming modes every paragraph fills as prose.
+Return non-nil when the buffer was modified."
+  (let ((jobs nil))
+    ;; Plan every paragraph before filling any, first to last, so a
+    ;; region spanning paragraphs (or a block of line comments) is
+    ;; planned once.  A triple-quoted string also has two starts, the
+    ;; quotes before its fence and the fence itself, so the second is
+    ;; skipped as covered too, see
+    ;; `fancy-fill-paragraph--string-fence-opener-start'.
+    (dolist (para (reverse (fancy-fill-paragraph--collect-paragraph-bounds beg end t)))
+      (let* ((covered-end (and jobs (fancy-fill-paragraph--syntax-fill-job-end (car jobs))))
+             ;; A paragraph within the last job is filled by it.
+             (covered (and covered-end (<= (cdr para) covered-end)))
+             ;; A covered paragraph is not scanned, otherwise a doc-string
+             ;; would be scanned to its end once for each of its paragraphs.
+             ;; Outside programming modes a quote in prose opens a string
+             ;; which may run into later paragraphs, so text is only prose,
+             ;; see `fancy-fill-paragraph--text-beside-regions-is-code-p'.
+             (regions
+              (and fancy-fill-paragraph-syntax-bounds
+                   (not covered)
+                   (fancy-fill-paragraph--text-beside-regions-is-code-p)
+                   (fancy-fill-paragraph--range-syntax-regions (car para) (cdr para))))
+             (starts (car regions)))
+        (cond
+         (covered
+          nil)
+         ;; Code beside a comment or string is left alone.
+         ((fancy-fill-paragraph--refuse-regions-p starts (cdr regions))
+          nil)
+         ;; Comments and strings only.
+         (starts
+          (dolist (syn-start starts)
+            (unless (or
+                     ;; Regions come in order and never overlap, so only the
+                     ;; last job planned can hold a start already covered.
+                     (and covered-end
+                          (<= (fancy-fill-paragraph--syntax-fill-job-beg (car jobs))
+                              syn-start
+                              covered-end))
+                     ;; A region opened in an earlier paragraph of the
+                     ;; selection without a job was left alone there, beside
+                     ;; code.  Its job would fill that paragraph too, the
+                     ;; code on its opener's line included.
+                     (and (< syn-start (car para)) (<= beg syn-start)))
+              ;; Only a comment that never closes has no job.
+              (let ((job (fancy-fill-paragraph--syntax-fill-job-at syn-start (cons beg end) para)))
+                (when job
+                  (push job jobs)
+                  (setq covered-end (fancy-fill-paragraph--syntax-fill-job-end job)))))))
+         (t
+          (push (fancy-fill-paragraph--syntax-fill-job-create
+                 :beg (car para)
+                 :end (cdr para)
+                 :fill-fn #'fancy-fill-paragraph--fill-region
+                 :args nil
+                 :resume (cdr para))
+                jobs)))))
+    ;; Pushed first to last, so they run last to first and earlier
+    ;; positions remain valid.
+    (fancy-fill-paragraph--syntax-fill-jobs-run jobs)))
 
 (defun fancy-fill-paragraph--syntax-fill-jobs-for-selection (beg end)
   "Return syntax fill jobs for active selection BEG..END, or nil.
@@ -1497,6 +1585,10 @@ Returns a list of (PARA-BEG . PARA-END) in reverse order so callers
 can fill later paragraphs first without invalidating earlier positions."
   (declare (important-return-value t))
   (save-excursion
+    ;; A BODY-END past the buffer never reaches the last line's end, so the
+    ;; scan would never stop.  Unlikely, it means a caller's bounds are out
+    ;; of date, but avoid hanging (paranoid).
+    (setq body-end (min body-end (point-max)))
     ;; Clamp selection to body so positions on delimiters still match.
     (setq sel-beg (min (max sel-beg body-beg) body-end))
     (setq sel-end (max (min sel-end body-end) sel-beg))
@@ -2657,8 +2749,10 @@ FIRST-LINE-EXTRA-WIDTH, when non-nil, narrows the first line, see
 
 (defun fancy-fill-paragraph--by-region-impl ()
   "Fill paragraphs in the active region.
-When the region is entirely inside a single comment or string,
-uses syntax-aware filling.  Returns non-nil when the buffer was modified."
+A region inside a single comment or string fills it with syntax-aware
+filling, otherwise each paragraph fills on its own, see
+`fancy-fill-paragraph--fill-selection-paragraphs'.
+Returns non-nil when the buffer was modified."
   (let ((beg (region-beginning))
         (end (region-end))
         ;; Snapshot buffer size to compute adjusted end position after filling.
@@ -2671,12 +2765,7 @@ uses syntax-aware filling.  Returns non-nil when the buffer was modified."
          (jobs
           (setq changed (fancy-fill-paragraph--syntax-fill-jobs-run jobs)))
          (t
-          ;; Paragraphs holding code beside a comment are left alone, the
-          ;; same refusal the cursor path makes.
-          (setq changed
-                (fancy-fill-paragraph--fill-paragraph-bounds
-                 (fancy-fill-paragraph--drop-refused-paragraphs
-                  (fancy-fill-paragraph--collect-paragraph-bounds beg end t))))))))
+          (setq changed (fancy-fill-paragraph--fill-selection-paragraphs beg end))))))
     ;; Restore mark/point in original direction, deactivate mark.
     (let ((end-adjusted (+ end (- (buffer-size) buf-size))))
       (cond

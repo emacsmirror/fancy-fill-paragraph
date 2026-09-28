@@ -81,6 +81,22 @@ Call inside a buffer whose major mode is already set."
   (delete-char -1)
   (should-fill-again-unchanged))
 
+(defun should-fill-selection (text-initial line-index text-expected)
+  "Fill TEXT-INITIAL selected from LINE-INDEX to its end, expecting TEXT-EXPECTED.
+Filling the same selection again must leave the result as it is.
+Call inside a buffer whose major mode is already set."
+  (buffer-reset-text text-initial)
+  (let ((transient-mark-mode t))
+    (dotimes (_ 2)
+      (goto-char (point-min))
+      (forward-line line-index)
+      (set-mark (point))
+      (goto-char (point-max))
+      (activate-mark)
+      (fancy-fill-paragraph)
+      (deactivate-mark)
+      (should (equal text-expected (buffer-string))))))
+
 (defmacro with-advice (advice &rest body)
   "Execute BODY with ADVICE temporarily enabled.
 
@@ -869,6 +885,374 @@ The cursor path already refuses this, a selection must refuse it too."
         (should (fancy-fill-paragraph))
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-region-whole-block-comment ()
+  "Selecting a whole block comment fills it as a comment.
+A selection ending past the comment was filled as prose, dropping the
+continuation prefix from wrapped lines."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "/** aaa bbb ccc ddd eee fff ggg\n"
+                 " *\n"
+                 " * hhh iii jjj kkk lll mmm nnn */\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "/** aaa bbb ccc ddd\n"
+                 " * eee fff ggg\n"
+                 " *\n"
+                 " * hhh iii jjj kkk\n"
+                 " * lll mmm nnn */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-region-whole-docstring ()
+  "Selecting a whole docstring fills it as a string, once.
+Its paragraphs are separated by a blank line, so the selection holds
+two paragraphs of the same string, which must be filled by one job."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 24)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "    Iii jjj kkk lll mmm nnn ooo ppp.\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "\n"
+                 "    Iii jjj kkk lll mmm\n"
+                 "    nnn ooo ppp.\n"
+                 "    \"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 1 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-region-line-comments-two-indents ()
+  "Selecting line comments at two indents fills each block as comments.
+Blocks at different indents were left to the prose fill, which dropped
+the delimiter from wrapped lines."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd eee fff\n"
+                 "  # ggg hhh iii jjj kkk lll\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "# aaa bbb ccc ddd\n"
+                 "# eee fff\n"
+                 "  # ggg hhh iii jjj\n"
+                 "  # kkk lll\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-region-comment-paragraph-beside-refused ()
+  "A comment paragraph fills as a comment, a mixed one stays refused.
+The two are separate paragraphs of one selection."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 24)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc ddd eee fff ggg hhh iii */\n"
+                 "\n"
+                 "int x = 1;\n"
+                 "// jjj kkk lll mmm nnn ooo ppp qqq.\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc ddd eee\n"
+                 " * fff ggg hhh iii */\n"
+                 "\n"
+                 "int x = 1;\n"
+                 "// jjj kkk lll mmm nnn ooo ppp qqq.\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-region-string-closer-in-prose-paragraph ()
+  "A string ending in a prose paragraph is not filled twice.
+The string's job runs to the end of its closer's line, which the prose
+paragraph also held.  The prose fill ran first, so the string's fill
+used positions it had moved and never finished.  Outside programming
+modes every paragraph fills as prose, the string's closer line with the
+rest of its paragraph."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "\"Aaa bbb\n"
+                 "\n"
+                 "ccc\" ddd     eee\n"
+                 "fff ggg hhh iii jjj kkk lll mmm nnn.\n"
+                 "\n"
+                 "ooo ppp qqq rrr sss ttt uuu vvv www.\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "\"Aaa bbb\n"
+                 "\n"
+                 "ccc\" ddd eee fff ggg\n"
+                 "hhh iii jjj kkk lll\n"
+                 "mmm nnn.\n"
+                 "\n"
+                 "ooo ppp qqq rrr sss\n"
+                 "ttt uuu vvv www.\n")))
+    (with-temp-buffer
+      (org-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-region-comment-closer-in-prose-paragraph ()
+  "A comment ending in a prose paragraph is not filled twice.
+As for a string, `html-mode' is not a programming mode so the paragraph
+is not refused, the comment fills as prose."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "<!-- aaa\n"
+                 "\n"
+                 "bbb --> ccc\n"
+                 "ddd eee fff ggg hhh iii jjj kkk lll mmm.\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "<!-- aaa\n"
+                 "\n"
+                 "bbb --> ccc ddd eee\n"
+                 "fff ggg hhh iii jjj\n"
+                 "kkk lll mmm.\n")))
+    (with-temp-buffer
+      (html-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-region-stray-quote-many-prose-paragraphs ()
+  "Every paragraph inside a string opened by a stray quote fills as prose."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "I bought a 12\" screen.\n"
+                 "\n"
+                 "Next paragraph without any quotes at all but it is long enough to wrap.\n"
+                 "\n"
+                 "Another paragraph without any quotes at all but it is long enough to wrap.\n"
+                 "\n"
+                 "Then she said \"hi\" to me, and then left.\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "I bought a 12\" screen.\n"
+                 "\n"
+                 "Next paragraph without any\n"
+                 "quotes at all but it is long\n"
+                 "enough to wrap.\n"
+                 "\n"
+                 "Another paragraph without any\n"
+                 "quotes at all but it is long\n"
+                 "enough to wrap.\n"
+                 "\n"
+                 "Then she said \"hi\" to me,\n"
+                 "and then left.\n")))
+    (with-temp-buffer
+      (org-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-region-string-opened-in-refused-paragraph ()
+  "A selected string opened beside code, after a prose paragraph, is left alone.
+Its paragraph is refused, the one before it filled as prose.  The next
+paragraph of the string was taken for prose too, as if a stray quote
+had opened it, moving the closer onto its text.  It is not filled as a
+string either, its opener shares a line with code."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "import os\n"
+                 "\n"
+                 "x = \"\"\"Summary\n"
+                 "more\n"
+                 "\n"
+                 "second paragraph\n"
+                 "\"\"\"\n"))
+        (text-expected-cursor
+         ;; format-next-line: off
+         (concat "import os\n"
+                 "\n"
+                 "x = \"\"\"Summary more\n"
+                 "\n"
+                 "second paragraph\n"
+                 "\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        ;; The cursor path fills the paragraph at point as a string.
+        (should-fill-same-from-every-position text-initial 3 text-expected-cursor)
+        (should-fill-selection text-initial 0 text-initial)))))
+
+(ert-deftest fill-syntax-bounds-region-stray-quote-prose-paragraphs ()
+  "A paragraph inside a string opened by a stray quote fills as prose.
+Outside programming modes a stray quote opens a string running into the
+paragraphs after it.  The paragraph holding the quote filled as prose,
+the one after it was skipped as if the string's job covered it.
+A paragraph holding a whole quote fills as prose too."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "I bought a 12\" screen.\n"
+                 "\n"
+                 "Next paragraph without any quotes at all but it is long enough to wrap.\n"
+                 "\n"
+                 "Then she said \"hi\" to me, and then left.\n"
+                 "\n"
+                 "\"A quote that is long enough to need wrapping here.\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "I bought a 12\" screen.\n"
+                 "\n"
+                 "Next paragraph without any\n"
+                 "quotes at all but it is long\n"
+                 "enough to wrap.\n"
+                 "\n"
+                 "Then she said \"hi\" to me,\n"
+                 "and then left.\n"
+                 "\n"
+                 "\"A quote that is long enough\n"
+                 "to need wrapping here.\"\n")))
+    (with-temp-buffer
+      (org-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-line-comment-at-buffer-end-no-newline ()
+  "A line comment ending the buffer without a newline fills as a comment.
+`forward-comment' fails on it, so it was taken for a block comment that
+never closes."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'python-mode
+               "x = 1\n# aaa bbb ccc ddd eee fff ggg hhh iii jjj"
+               "x = 1\n# aaa bbb ccc ddd\n# eee fff ggg hhh\n# iii jjj")
+              (list
+               #'c-mode
+               "int x;\n// aaa bbb ccc ddd eee fff ggg hhh iii jjj"
+               "int x;\n// aaa bbb ccc ddd\n// eee fff ggg hhh\n// iii jjj")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) 1 (nth 2 case)))))))
+
+(ert-deftest fill-syntax-bounds-region-unclosed-block-comment ()
+  "Selecting a block comment that never closes leaves it alone.
+It has no job of its own.  A closed comment before it still fills as a
+comment, in the same paragraph or another."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-comment-closed "/* aaa bbb ccc ddd eee fff ggg hhh iii jjj */\n")
+        (text-comment-unclosed
+         ;; format-next-line: off
+         (concat "/* A comment with quite a lot of words in it so that it wraps\n"
+                 " * and more words here too"))
+        (text-expected-closed
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc ddd eee fff ggg\n"
+                 " * hhh iii jjj */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-comment-unclosed 0 text-comment-unclosed)
+        (should-fill-selection
+         (concat text-comment-closed "\n" text-comment-unclosed)
+         0
+         (concat text-expected-closed "\n" text-comment-unclosed))
+        (should-fill-selection
+         (concat text-comment-closed text-comment-unclosed)
+         0
+         (concat text-expected-closed text-comment-unclosed))))))
+
+(ert-deftest fill-syntax-bounds-region-unclosed-after-comment-beside-code ()
+  "A selected unclosed comment after one left alone beside code is left alone.
+Neither comment is changed, the closer of the first stays on its line."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "int x; /* aaa bbb\n"
+                 "\n"
+                 "ccc ddd eee fff ggg hhh iii jjj kkk\n"
+                 "lll */\n"
+                 "/* mmm nnn ooo ppp qqq rrr sss ttt"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "int x; /* aaa bbb\n"
+                 "\n"
+                 "ccc ddd eee fff ggg hhh iii jjj kkk\n"
+                 "lll */\n"
+                 "/* mmm nnn ooo ppp qqq rrr sss ttt")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial 0 text-expected)))))
+
+(ert-deftest fill-syntax-bounds-region-beside-code-spanning-paragraphs ()
+  "A selected comment or string opened beside code is left alone.
+It spans a blank line into a paragraph without code.  Its first
+paragraph was refused, the next filled it, its opener line included."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (cons
+               #'c-mode
+               (concat
+                "int x; /* aaa bbb ccc ddd eee fff ggg hhh iii\n"
+                "\n"
+                "   jjj kkk lll mmm nnn ooo ppp qqq rrr */\n"))
+              (cons
+               #'python-mode
+               (concat
+                "x = \"\"\"aaa bbb ccc ddd eee fff ggg hhh iii\n"
+                "\n"
+                "jjj kkk lll mmm nnn ooo ppp qqq rrr\n"
+                "\"\"\"\n"))))
+      (with-temp-buffer
+        (funcall (car case))
+        (let ((inhibit-message t))
+          (should-fill-selection (cdr case) 0 (cdr case)))))))
+
+(ert-deftest fill-syntax-bounds-body-paragraph-bounds-past-buffer-end ()
+  "Body paragraph bounds ending past the buffer stop at its end.
+Out of date bounds must not hang the scan."
+  (with-temp-buffer
+    (insert "aaa\nbbb")
+    (should (equal '((1 . 8)) (fancy-fill-paragraph--body-paragraph-bounds 1 100 0 1 100)))))
+
 (ert-deftest fill-lines-first-line-extra-width-first-line-only ()
   "The first line's extra width narrows the first line only.
 Whichever section holds the first line takes it: prose before a list,
@@ -1483,7 +1867,11 @@ body text deletes it."
       (should (equal '(string . 11) (fancy-fill-paragraph--syntax-region-at 1)))
       (buffer-reset-text "// line\nx;")
       (syntax-propertize (point-max))
-      (should (equal '(comment . 9) (fancy-fill-paragraph--syntax-region-at 1))))))
+      (should (equal '(comment . 9) (fancy-fill-paragraph--syntax-region-at 1)))
+      ;; The end of the buffer closes a line comment without a newline.
+      (buffer-reset-text "x; // line")
+      (syntax-propertize (point-max))
+      (should (equal '(comment . 11) (fancy-fill-paragraph--syntax-region-at 4))))))
 
 (ert-deftest syntax-region-at-unclosed-regions ()
   "A region that never closes reports its kind with no resume position.
@@ -1558,13 +1946,35 @@ a real empty string stays apart, after a closed string or before code."
 (ert-deftest string-fence-closer-owner-not-a-comment ()
   "The quotes opening a triple-quoted string below a comment aren't its closer.
 The comment was taken to own them, scanning for its end skips it and
-ends past the quotes."
-  (with-temp-buffer
-    (python-mode)
-    (let ((inhibit-message t))
-      (buffer-reset-text "# Aaa.\n\"\"\"Bbb.\n\"\"\"\n")
-      (syntax-propertize (point-max))
-      (should-not (fancy-fill-paragraph--string-fence-closer-owner 8)))))
+ends past the quotes.  Scanning the selection's regions then resumed at
+the quotes, the comment's end, looping forever."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "# Aaa.\n"
+                 "\"\"\"Bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Iii.\n"
+                 "\"\"\"\n"
+                 "import os\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "# Aaa.\n"
+                 "\"\"\"Bbb ccc ddd eee\n"
+                 "fff ggg hhh.\n"
+                 "\n"
+                 "Iii.\n"
+                 "\"\"\"\n"
+                 "import os\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (buffer-reset-text text-initial)
+        (syntax-propertize (point-max))
+        (should-not (fancy-fill-paragraph--string-fence-closer-owner 8))
+        (should-fill-selection text-initial 0 text-expected)))))
 
 (ert-deftest string-opener-info-splits-delimiter-from-text ()
   "The opener prefix ends after one run of the opening delimiter.
