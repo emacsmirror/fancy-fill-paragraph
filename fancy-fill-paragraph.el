@@ -242,12 +242,15 @@ is kept whole, so the result can be wider."
      (make-string (max 0 (- opener-col (current-column))) ?\s))))
 
 (defsubst fancy-fill-paragraph--prefix-column-width (pos prefix)
-  "Return the column width of PREFIX at buffer position POS."
+  "Return the column width of PREFIX at buffer position POS.
+A line ending within PREFIX, such as a bare ` *' separator without the
+trailing space of ` * ', is measured as if it held all of PREFIX."
   (declare (important-return-value t))
   (save-excursion
     (goto-char pos)
     (goto-char (min (+ pos (length prefix)) (pos-eol)))
-    (current-column)))
+    ;; Measure what the line holds, tabs included, then add the rest.
+    (+ (current-column) (string-width (substring prefix (- (point) pos))))))
 
 (defsubst fancy-fill-paragraph--last-bol (end)
   "Return the beginning-of-line position for buffer position END."
@@ -1652,8 +1655,7 @@ OPENER-COL is the column where content begins after the opener delimiter."
            comment-start-pos
            (ppss-comment-or-string-start (save-excursion (syntax-ppss (1- end)))))
     (error "Expected comment at %d" comment-start-pos))
-  (let* ((prefix-col
-          (max (fancy-fill-paragraph--prefix-column-width beg cont-prefix) (length cont-prefix)))
+  (let* ((prefix-col (fancy-fill-paragraph--prefix-column-width beg cont-prefix))
          (opener-text
           (save-excursion
             (goto-char beg)

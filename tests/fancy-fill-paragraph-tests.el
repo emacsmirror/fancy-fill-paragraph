@@ -3162,6 +3162,51 @@ keep point with its text."
 
 
 ;; ---------------------------------------------------------------------------
+;; Refill Stability Tests
+;;
+;; Filling a second time must never change the result.
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-bare-separator-width ()
+  "A bare ` *' separator line does not widen the paragraph above it.
+The prefix width was measured on that line, one column short of ` * '.
+The paragraph wraps past two lines, the first line alone may not show
+it, its width being taken from the opener."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc dddddd eee fff ggg hhh iii jjj\n"
+                 " *\n"
+                 " * Details here. */\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc\n"
+                 " * dddddd eee fff\n"
+                 " * ggg hhh iii jjj\n"
+                 " *\n"
+                 " * Details here. */\n"))
+        ;; The same comment with the separator's trailing space kept.
+        (text-initial-spaced
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc dddddd eee fff ggg hhh iii jjj\n"
+                 " * \n"
+                 " * Details here. */\n"))
+        (text-expected-spaced
+         ;; format-next-line: off
+         (concat "/* aaa bbb ccc\n"
+                 " * dddddd eee fff\n"
+                 " * ggg hhh iii jjj\n"
+                 " * \n"
+                 " * Details here. */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)
+        (should-fill-same-from-every-position text-initial-spaced 0 text-expected-spaced)))))
+
+
+;; ---------------------------------------------------------------------------
 ;; Syntax Bounds Tests
 
 (ert-deftest fill-syntax-bounds-c-comments-wrap ()
