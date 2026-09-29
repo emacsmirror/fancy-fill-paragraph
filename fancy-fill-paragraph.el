@@ -2826,6 +2826,8 @@ Return non-nil when the buffer was modified."
   (interactive "*")
   (let ((changed
          (cond
+          ;; NOTE: intentionally `region-active-p', not `use-region-p', so an
+          ;; empty active region still takes the region path.  Leave as-is.
           ((region-active-p)
            (fancy-fill-paragraph--by-region-impl))
           (t
