@@ -886,7 +886,9 @@ never negative."
 BEG and END are the full region bounds (from `pos-bol' of the opener
 to `pos-eol' of the closer).  Returns (BODY-BEG . BODY-END) spanning
 from the first line after the opener to the last line before the closer,
-or nil when there are no lines between them (single-line region).
+or nil when there are no lines between them (the closer on the opener
+line or the next).  A lone empty line between them counts, BODY-BEG then
+equals BODY-END.
 Note: this returns the raw inner body regardless of whether the opener
 line carries text.  Callers that need to include opener-line text in
 paragraph scanning should widen the returned bounds themselves."
@@ -896,7 +898,8 @@ paragraph scanning should widen the returned bounds themselves."
     (goto-char end)
     (let ((body-end (pos-eol 0)))
       (goto-char beg)
-      (when (and (zerop (forward-line 1)) (> body-end (point)))
+      ;; An empty line ends where it starts, so equal bounds count too.
+      (when (and (zerop (forward-line 1)) (>= body-end (point)))
         (cons (point) body-end)))))
 
 (defun fancy-fill-paragraph--code-after-closer-p (closer-end)
@@ -1550,12 +1553,18 @@ COMMENT-START-POS is the buffer position of the comment opener."
     (beg body opener-col comment-start-pos)
   "Return the full continuation prefix for a block comment.
 BEG is the region start, BODY is the body bounds or nil, OPENER-COL is
-the opener column, and COMMENT-START-POS is the comment opener position."
+the opener column, and COMMENT-START-POS is the comment opener position.
+The indentation is read from the first body line, or the opener line
+when the body starts with a blank line, which holds none to read."
   (declare (important-return-value t))
   (concat
    (fancy-fill-paragraph--extract-body-indent
     (cond
-     (body
+     ((and body
+           (save-excursion
+             (goto-char (car body))
+             (skip-chars-forward " \t" (pos-eol))
+             (not (eolp))))
       (car body))
      (t
       beg))
@@ -1875,6 +1884,30 @@ Such a line (e.g. ` * text */') is laid out as the body lines are."
     (and closer-bol
          (string-prefix-p cont-prefix (buffer-substring-no-properties closer-bol end)))))
 
+(defun fancy-fill-paragraph--block-comment-unprefixed-closer-p
+    (inner-body closer-bol closer-end cont-prefix)
+  "Return non-nil when the closer line joins a body laid out without CONT-PREFIX.
+INNER-BODY is the body bounds, CLOSER-BOL starts the closer line and
+CLOSER-END follows the closer.  Such a body (text indented without the
+` * ' of `comment-continue', as GNU style comments are for e.g.) is
+filled without stripping the prefix, so the closer line can join it.
+It must hold text before the closer.  Only the body's last line is
+checked, the closer line joins its paragraph, an empty line counts as
+unprefixed."
+  (declare (important-return-value t))
+  (and (save-excursion
+         (goto-char (cdr inner-body))
+         (goto-char (pos-bol))
+         (not (fancy-fill-paragraph--line-matches-prefix-p cont-prefix)))
+       (save-excursion
+         ;; Text before the closer, a closer alone is a single word.
+         ;; Its characters have no common syntax to skip (`*)' in
+         ;; `pascal-mode' ends with a close parenthesis for e.g.).
+         (goto-char closer-bol)
+         (skip-chars-forward " \t" closer-end)
+         (skip-chars-forward "^ \t" closer-end)
+         (< (point) closer-end))))
+
 (defun fancy-fill-paragraph--block-comment-inline-lines
     (beg end opener-col prefix-col cont-prefix verbatim-closer-bol)
   "Return inline block comment content lines stripped for filling.
@@ -1939,7 +1972,8 @@ Either way a closer line no wider than the continuation prefix, such
 as ` */', stays as it is, and code after the closer is never reflowed.
 Other text on the closer line joins the last paragraph, for body
 paragraphs only when the line starts with the continuation prefix
-\(e.g. ` * text */')."
+\(e.g. ` * text */'), or the body is laid out without it
+\(e.g. `   text */')."
   (let ((pos (point)))
     (save-excursion
       (comment-normalize-vars)
@@ -1977,10 +2011,15 @@ paragraphs only when the line starts with the continuation prefix
             ;; NOTE: the body is filled by stripping the prefix width from each
             ;; line, a closer line of another shape (e.g. `  */' or ` **/') would
             ;; be cut into, dropping text or leaving the comment unclosed.
-            ;; So such a line is kept as it is.
-            (and (not closer-blocked)
-                 (fancy-fill-paragraph--block-comment-prefixed-closer-p beg end cont-prefix)
-                 end)))
+            ;; So such a line is kept as it is.  A body laid out without the
+            ;; prefix is not stripped, so its closer line joins.
+            (and
+             (not closer-blocked)
+             (or
+              (fancy-fill-paragraph--block-comment-prefixed-closer-p beg end cont-prefix)
+              (fancy-fill-paragraph--block-comment-unprefixed-closer-p
+               inner-body (fancy-fill-paragraph--closer-line-bol beg end) closer-end cont-prefix))
+             end)))
          (lambda ()
            (cond
             (closer-blocked

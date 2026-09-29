@@ -4130,6 +4130,641 @@ indentation is used."
       (let ((inhibit-message t))
         (should-fill-same-from-every-position text-initial 1 text-expected)))))
 
+(ert-deftest fill-syntax-bounds-python-docstring-empty-line-summary-wraps ()
+  "A summary wraps above an empty line, the only line before the closer line.
+The empty line and the body on the closer line are kept as they are.
+The string was taken for a two-line one and filled as a single
+paragraph, dropping the empty line."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "    Body iii.\"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "\n"
+                 "    Body iii.\"\"\"\n"))
+        ;; The same docstring quoted with apostrophes.
+        (text-initial-single
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    '''Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "    Body iii.'''\n"))
+        (text-expected-single
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    '''Summary aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "\n"
+                 "    Body iii.'''\n"))
+        ;; The same docstring in a method, indented further.
+        (text-initial-method
+         ;; format-next-line: off
+         (concat "class C:\n"
+                 "    def f(self):\n"
+                 "        \"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "        Body iii.\"\"\"\n"))
+        (text-expected-method
+         ;; format-next-line: off
+         (concat "class C:\n"
+                 "    def f(self):\n"
+                 "        \"\"\"Summary aaa bbb ccc ddd\n"
+                 "        eee fff ggg hhh.\n"
+                 "\n"
+                 "        Body iii.\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        ;; Nothing else needs filling.
+        (should-fill-same-from-every-position text-initial 2 text-initial)
+        (should-fill-same-from-every-position text-initial 3 text-initial)
+        (should-fill-same-from-every-position text-initial-single 1 text-expected-single)
+        (let ((fill-column 34))
+          (should-fill-same-from-every-position text-initial-method 2 text-expected-method))))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-empty-line-body-wraps ()
+  "A body on the closer line wraps below an empty line, which is kept.
+The string was taken for a two-line one, the body beside its closer
+left unfilled."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary.\n"
+                 "\n"
+                 "    Body iii jjj kkk lll mmm nnn ooo ppp qqq.\"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary.\n"
+                 "\n"
+                 "    Body iii jjj kkk lll mmm\n"
+                 "    nnn ooo ppp qqq.\"\"\"\n"))
+        ;; No text beside the opener.
+        (text-initial-bare-opener
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"\n"
+                 "\n"
+                 "    Body iii jjj kkk lll mmm nnn ooo ppp qqq.\"\"\"\n"))
+        (text-expected-bare-opener
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"\n"
+                 "\n"
+                 "    Body iii jjj kkk lll mmm\n"
+                 "    nnn ooo ppp qqq.\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 3 text-expected)
+        (should-fill-same-from-every-position text-initial 1 text-initial)
+        (should-fill-same-from-every-position
+         text-initial-bare-opener 3 text-expected-bare-opener)))))
+
+(ert-deftest fill-syntax-bounds-python-module-docstring-empty-line ()
+  "Each paragraph of a module docstring fills alone, the empty line kept.
+Filling either merged both paragraphs, dropping the empty line."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "\"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.\"\"\"\n"))
+        (text-expected-summary
+         ;; format-next-line: off
+         (concat "\"\"\"Summary aaa bbb ccc ddd eee\n"
+                 "fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.\"\"\"\n"))
+        (text-expected-body
+         ;; format-next-line: off
+         (concat "\"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn\n"
+                 "ooo ppp qqq.\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected-summary)
+        (should-fill-same-from-every-position text-initial 1 text-initial)
+        (should-fill-same-from-every-position text-initial 2 text-expected-body)))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-empty-line-closer-alone ()
+  "A summary wraps above an empty line followed by a closer on its own line.
+The string was taken for a two-line one, filling dropped the empty line."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "    \"\"\"\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "\n"
+                 "    \"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        (should-fill-same-from-every-position text-initial 2 text-initial)
+        (should-fill-same-from-every-position text-initial 3 text-initial)))))
+
+(ert-deftest fill-syntax-bounds-elisp-docstring-empty-line ()
+  "Each paragraph of a docstring fills alone, the empty line kept.
+This is the usual layout of a short Emacs Lisp docstring.  The string
+was taken for a two-line one, filling dropped the empty line or left
+the body unfilled."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial-summary
+         ;; format-next-line: off
+         (concat "(defun f ()\n"
+                 "  \"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii.\"\n"
+                 "  nil)\n"))
+        (text-expected-summary
+         ;; format-next-line: off
+         (concat "(defun f ()\n"
+                 "  \"Summary aaa bbb ccc ddd eee\n"
+                 "fff ggg hhh.\n"
+                 "\n"
+                 "Body iii.\"\n"
+                 "  nil)\n"))
+        (text-initial-body
+         ;; format-next-line: off
+         (concat "(defun f ()\n"
+                 "  \"Summary.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.\"\n"
+                 "  nil)\n"))
+        (text-expected-body
+         ;; format-next-line: off
+         (concat "(defun f ()\n"
+                 "  \"Summary.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn\n"
+                 "ooo ppp qqq.\"\n"
+                 "  nil)\n"))
+        ;; Code after the closer, the body stays as it is.
+        (text-initial-defvar
+         ;; format-next-line: off
+         (concat "(defvar v nil\n"
+                 "  \"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.\")\n"))
+        (text-expected-defvar
+         ;; format-next-line: off
+         (concat "(defvar v nil\n"
+                 "  \"Summary aaa bbb ccc ddd eee\n"
+                 "fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.\")\n")))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial-summary 1 text-expected-summary)
+        (should-fill-same-from-every-position text-initial-summary 2 text-initial-summary)
+        (should-fill-same-from-every-position text-initial-summary 3 text-initial-summary)
+        (should-fill-same-from-every-position text-initial-body 3 text-expected-body)
+        (should-fill-same-from-every-position text-initial-defvar 1 text-expected-defvar)
+        (should-fill-same-from-every-position text-initial-defvar 3 text-initial-defvar)))))
+
+(ert-deftest fill-syntax-bounds-string-empty-line-other-modes ()
+  "An empty line as the only line before the closer line is kept in other modes.
+Covers a C string and JavaScript template strings, with and without code
+around them."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial-c
+         ;; format-next-line: off
+         (concat "char *s = \"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii.\";\n"))
+        (text-expected-c
+         ;; format-next-line: off
+         (concat "char *s = \"Summary aaa bbb ccc\n"
+                 "ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii.\";\n"))
+        (text-initial-js
+         ;; format-next-line: off
+         (concat "const s = `Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.`;\n"))
+        (text-expected-js
+         ;; format-next-line: off
+         (concat "const s = `Summary aaa bbb ccc\n"
+                 "ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.`;\n"))
+        ;; No code around the string, so the body fills too.
+        (text-initial-js-bare
+         ;; format-next-line: off
+         (concat "`Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.`\n"))
+        (text-expected-js-bare-summary
+         ;; format-next-line: off
+         (concat "`Summary aaa bbb ccc ddd eee\n"
+                 "fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.`\n"))
+        (text-expected-js-bare-body
+         ;; format-next-line: off
+         (concat "`Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn\n"
+                 "ooo ppp qqq.`\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial-c 0 text-expected-c)
+        ;; Code after the closer, the body stays as it is.
+        (should-fill-same-from-every-position text-initial-c 2 text-initial-c)))
+    (with-temp-buffer
+      (js-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial-js 0 text-expected-js)
+        (should-fill-same-from-every-position text-initial-js 2 text-initial-js)
+        (should-fill-same-from-every-position text-initial-js-bare 0 text-expected-js-bare-summary)
+        (should-fill-same-from-every-position text-initial-js-bare 1 text-initial-js-bare)
+        (should-fill-same-from-every-position
+         text-initial-js-bare 2 text-expected-js-bare-body)))))
+
+(ert-deftest fill-syntax-bounds-region-docstring-empty-line ()
+  "Selecting a whole docstring fills each paragraph, the empty line kept.
+The selection filled both paragraphs as one, dropping the empty line,
+and a second fill changed the result again."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial-python
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "    Body iii jjj kkk lll mmm nnn ooo ppp qqq.\"\"\"\n"))
+        (text-expected-python
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "\n"
+                 "    Body iii jjj kkk lll mmm\n"
+                 "    nnn ooo ppp qqq.\"\"\"\n"))
+        (text-initial-elisp
+         ;; format-next-line: off
+         (concat "(defun f ()\n"
+                 "  \"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.\"\n"
+                 "  nil)\n"))
+        (text-expected-elisp
+         ;; format-next-line: off
+         (concat "(defun f ()\n"
+                 "  \"Summary aaa bbb ccc ddd eee\n"
+                 "fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn\n"
+                 "ooo ppp qqq.\"\n"
+                 "  nil)\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial-python 1 text-expected-python)))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (let ((inhibit-message t))
+        (should-fill-selection text-initial-elisp 1 text-expected-elisp)))))
+
+(ert-deftest fill-syntax-bounds-block-comment-empty-line-body-tab-indent ()
+  "A tab indented block comment starting its body with an empty line keeps tabs.
+The indentation was read from the empty line, which holds none, so the
+continuation lines were indented with spaces."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (indent-tabs-mode t)
+        (tab-width 8)
+        (text-initial
+         ;; format-next-line: off
+         (concat "void f() {\n"
+                 "\t/* Summary aaa bbb ccc ddd eee fff ggg.\n"
+                 "\n"
+                 "\t */\n"
+                 "}\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "void f() {\n"
+                 "\t/* Summary aaa bbb ccc\n"
+                 "\t * ddd eee fff ggg.\n"
+                 "\n"
+                 "\t */\n"
+                 "}\n"))
+        (text-initial-longer
+         ;; format-next-line: off
+         (concat "void f() {\n"
+                 "\t/* Summary aaa bbb ccc ddd eee fff ggg.\n"
+                 "\n"
+                 "\t   Body.\n"
+                 "\t */\n"
+                 "}\n"))
+        (text-expected-longer
+         ;; format-next-line: off
+         (concat "void f() {\n"
+                 "\t/* Summary aaa bbb ccc\n"
+                 "\t * ddd eee fff ggg.\n"
+                 "\n"
+                 "\t   Body.\n"
+                 "\t */\n"
+                 "}\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 1 text-expected)
+        (should-fill-same-from-every-position text-initial-longer 1 text-expected-longer)))))
+
+(ert-deftest fill-syntax-bounds-c-mode-block-comment-empty-line-body ()
+  "A block comment with a lone empty body line fills as a longer one does.
+The empty line is kept, as it is when more body lines follow.  Filled
+as a two-line comment, the empty line became a ` *' separator and the
+closer line took ` * ' in place of its own prefix."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "/* Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "   Body iii. */\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "/* Summary aaa bbb ccc ddd eee\n"
+                 " * fff ggg hhh.\n"
+                 "\n"
+                 "   Body iii. */\n"))
+        ;; The same comment with the closer on a line of its own.
+        (text-initial-longer
+         ;; format-next-line: off
+         (concat "/* Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "   Body iii.\n"
+                 " */\n"))
+        (text-expected-longer
+         ;; format-next-line: off
+         (concat "/* Summary aaa bbb ccc ddd eee\n"
+                 " * fff ggg hhh.\n"
+                 "\n"
+                 "   Body iii.\n"
+                 " */\n"))
+        (text-initial-javadoc
+         ;; format-next-line: off
+         (concat "/** Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 " * Body iii. */\n"))
+        (text-expected-javadoc
+         ;; format-next-line: off
+         (concat "/** Summary aaa bbb ccc ddd\n"
+                 " * eee fff ggg hhh.\n"
+                 "\n"
+                 " * Body iii. */\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)
+        (should-fill-same-from-every-position text-initial 2 text-initial)
+        (should-fill-same-from-every-position text-initial-longer 0 text-expected-longer)
+        (should-fill-same-from-every-position text-initial-javadoc 0 text-expected-javadoc)))))
+
+(ert-deftest fill-syntax-bounds-block-comment-empty-line-body-code-after-closer ()
+  "A block comment with a lone empty body line and code after its closer.
+Its text fills as a longer comment's does, the closer line and the code
+after it are left as they are."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial
+         ;; format-next-line: off
+         (concat "/* Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "   Body iii jjj kkk lll mmm nnn ooo. */ int x = 1;\n"))
+        (text-expected
+         ;; format-next-line: off
+         (concat "/* Summary aaa bbb ccc ddd eee\n"
+                 " * fff ggg hhh.\n"
+                 "\n"
+                 "   Body iii jjj kkk lll mmm nnn ooo. */ int x = 1;\n"))
+        (text-initial-html
+         ;; format-next-line: off
+         (concat "<!-- Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo. --> <p>x</p>\n"))
+        (text-expected-html
+         ;; format-next-line: off
+         (concat "<!-- Summary aaa bbb ccc ddd\n"
+                 " !-- eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn ooo. --> <p>x</p>\n")))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial 0 text-expected)
+        (should-fill-same-from-every-position text-initial 2 text-initial)))
+    (with-temp-buffer
+      (html-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial-html 0 text-expected-html)
+        (should-fill-same-from-every-position text-initial-html 2 text-initial-html)))))
+
+(ert-deftest fill-syntax-bounds-block-comment-unprefixed-closer-line-joins ()
+  "A closer line with text joins a body laid out without the ` * ' prefix.
+Only a closer line starting with the continuation prefix joined, so in
+a GNU style comment the text beside the closer was never filled.  Once
+an empty line counted as a body, a three-line comment of this shape was
+not filled either.  A closer alone on its line stays there."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'c-mode
+               (concat "/* Aaa bbb.\n" "\n" "   Ccc ddd eee fff ggg hhh iii. */\n")
+               (concat "/* Aaa bbb.\n" "\n" "   Ccc ddd eee fff\n" "   ggg hhh iii. */\n"))
+              (list
+               #'c-mode
+               (concat
+                "/* Aaa bbb.\n" "\n" "   Ccc ddd eee fff\n" "   ggg hhh iii jjj kkk lll. */\n")
+               (concat
+                "/* Aaa bbb.\n"
+                "\n"
+                "   Ccc ddd eee fff\n"
+                "   ggg hhh iii jjj\n"
+                "   kkk lll. */\n"))
+              (list
+               #'c-mode
+               (concat "/* Aaa bbb.\n" "\n" "   Ccc ddd eee fff ggg hhh iii.\n" "   */\n")
+               (concat "/* Aaa bbb.\n" "\n" "   Ccc ddd eee fff\n" "   ggg hhh iii.\n" "   */\n"))
+              ;; Closers ending in a close parenthesis rather than
+              ;; punctuation.
+              (list
+               #'pascal-mode
+               (concat "(* Aaa bbb.\n" "\n" "   Ccc ddd eee fff ggg hhh iii. *)\n")
+               (concat "(* Aaa bbb.\n" "\n" "   Ccc ddd eee fff\n" "   ggg hhh iii. *)\n"))
+              (list
+               #'pascal-mode
+               (concat "(* Aaa bbb.\n" "\n" "   Ccc ddd eee fff ggg hhh iii.\n" "   *)\n")
+               (concat "(* Aaa bbb.\n" "\n" "   Ccc ddd eee fff\n" "   ggg hhh iii.\n" "   *)\n"))
+              (list
+               #'pascal-mode
+               (concat "{ Aaa bbb.\n" "\n" "  Ccc ddd eee fff ggg hhh iii.\n" "  }\n")
+               (concat "{ Aaa bbb.\n" "\n" "  Ccc ddd eee fff\n" "  ggg hhh iii.\n" "  }\n"))
+              (list
+               #'html-mode
+               (concat "<!-- Aaa bbb.\n" "\n" "     Ccc ddd eee fff ggg hhh. -->\n")
+               (concat "<!-- Aaa bbb.\n" "\n" "     Ccc ddd eee fff\n" "     ggg hhh. -->\n"))))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) 2 (nth 2 case))
+          (should-fill-selection (nth 1 case) 0 (nth 2 case)))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-unprefixed-closer-line-indent ()
+  "A closer line with text joins an unprefixed body however it is indented.
+Shallower or deeper than the body's text, it takes the continuation
+prefix the body's lines are given."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               (concat "/* Aaa bbb.\n" "   Ccc ddd eee fff ggg hhh iii.\n" "   Jjj kkk. */\n")
+               (concat
+                "/* Aaa bbb.\n" " * Ccc ddd eee fff\n" " * ggg hhh iii.\n" " * Jjj kkk. */\n"))
+              (list
+               (concat "/* Aaa bbb.\n" "   Ccc ddd eee fff ggg hhh iii.\n" "Jjj kkk. */\n")
+               (concat
+                "/* Aaa bbb.\n" " * Ccc ddd eee fff\n" " * ggg hhh iii.\n" " * Jjj kkk. */\n"))
+              (list
+               (concat "/* Aaa bbb.\n" "   Ccc ddd eee fff ggg hhh iii.\n" "       Jjj kkk. */\n")
+               (concat
+                "/* Aaa bbb.\n" " * Ccc ddd eee fff\n" " * ggg hhh iii.\n" " * Jjj kkk. */\n"))))
+      (with-temp-buffer
+        (c-mode)
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 0 case) 0 (nth 1 case))
+          (should-fill-selection (nth 0 case) 0 (nth 1 case)))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-empty-separator-closer-line ()
+  "An empty separator line leaves the last paragraph as a ` *' one does.
+The whole body was checked for the ` * ' prefix, which an empty line
+lacks, so the closer line joined the last paragraph and its prefixed
+lines were no longer joined.  Only the paragraph the closer joins is
+relevant."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 70)
+        (sentence-end-double-space nil))
+    (dolist (separator (list "" " *"))
+      (with-temp-buffer
+        (c-mode)
+        (let ((inhibit-message t)
+              (text-initial
+               ;; format-next-line: off
+               (concat "/*\n"
+                       " * aaa\n"
+                       separator "\n"
+                       " * bbb bbb\n"
+                       " * ccc\n"
+                       "   ddd */\n"))
+              (text-expected
+               ;; format-next-line: off
+               (concat "/*\n"
+                       " * aaa\n"
+                       separator "\n"
+                       " * bbb bbb ccc\n"
+                       "   ddd */\n")))
+          (should-fill-same-from-every-position text-initial 3 text-expected)
+          (should-fill-selection text-initial 0 text-expected))))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-empty-line-neighbours-unchanged ()
+  "A two-line docstring fills as one paragraph, two empty lines are kept.
+So is an empty line holding blank-space.  These sit beside a lone empty
+line, whose handling must not change them."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil)
+        (text-initial-two-line
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "    Body iii.\"\"\"\n"))
+        (text-expected-two-line
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc\n"
+                 "    ddd eee fff ggg hhh.\n"
+                 "    Body iii.\"\"\"\n"))
+        (text-initial-two-empty
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "\n"
+                 "    Body iii.\"\"\"\n"))
+        (text-expected-two-empty
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "\n"
+                 "\n"
+                 "    Body iii.\"\"\"\n"))
+        (text-initial-spaced
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "    \n"
+                 "    Body iii.\"\"\"\n"))
+        (text-expected-spaced
+         ;; format-next-line: off
+         (concat "def f():\n"
+                 "    \"\"\"Summary aaa bbb ccc ddd\n"
+                 "    eee fff ggg hhh.\n"
+                 "    \n"
+                 "    Body iii.\"\"\"\n")))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position text-initial-two-line 1 text-expected-two-line)
+        (should-fill-same-from-every-position text-initial-two-line 2 text-expected-two-line)
+        (should-fill-same-from-every-position text-initial-two-empty 1 text-expected-two-empty)
+        (should-fill-same-from-every-position text-initial-spaced 1 text-expected-spaced)))))
+
 (ert-deftest fill-syntax-bounds-python-docstring-cursor-on-closer-line ()
   "A cursor on the closing quotes fills the docstring they close.
 The quotes after the closing fence read as an empty string, which was
