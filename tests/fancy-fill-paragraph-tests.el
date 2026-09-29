@@ -2728,6 +2728,24 @@ as one syntax region while the option is on."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-dot-point-continuation-less-indented ()
+  "Dot-point continuation indented less than the item text keeps its text.
+The item's indentation was removed from each continuation line without
+checking it was blank, deleting the first letters of the line."
+  (let ((text-initial
+         ;; format-next-line: off
+         (concat " - Alpha bravo\n"
+                 "  charlie delta"))
+        (text-expected
+         ;; format-next-line: off
+         (concat " - Alpha bravo charlie\n"
+                 "   delta"))
+        (fill-column 24)
+        (sentence-end-double-space nil))
+    (with-fancy-fill-paragraph-test text-initial
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
 (ert-deftest fill-dot-point-recursive ()
   "Nested dot-points at multiple indent levels fill independently."
   (let ((text-initial

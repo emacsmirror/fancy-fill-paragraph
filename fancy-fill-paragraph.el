@@ -325,14 +325,10 @@ leading indentation."
          (eolp))))
 
 (defsubst fancy-fill-paragraph--strip-indent (line n)
-  "Strip N leading characters from LINE.
-Falls back to `string-trim-left' when LINE is shorter than N."
+  "Strip up to N leading blank characters from LINE.
+A line indented less than N keeps its text."
   (declare (important-return-value t))
-  (cond
-   ((>= (length line) n)
-    (substring line n))
-   (t
-    (string-trim-left line))))
+  (substring line (min n (fancy-fill-paragraph--leading-indent line))))
 
 (defun fancy-fill-paragraph--collect-paragraph-bounds (beg end &optional clamp-end)
   "Return paragraph bounds in BEG..END in reverse order.
