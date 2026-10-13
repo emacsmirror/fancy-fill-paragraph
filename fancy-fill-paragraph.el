@@ -1721,16 +1721,17 @@ Returns non-nil when the buffer was modified."
                                                    first-prefix
                                                    prefix-col)))
 
-(defun fancy-fill-paragraph--string-continuation-prefix (inner-body closer-alone-bol)
+(defun fancy-fill-paragraph--string-continuation-prefix (body-beg closer-bol closer-alone)
   "Return the continuation prefix for a multi-line string with opener text.
-INNER-BODY is the raw body bounds (first line after opener to last line
-before closer).  Returns a blank-space string, the least indentation of
-the lines continuing the opener line's paragraph.  When the opener line
-is a paragraph of its own (a summary line for e.g.), the closer line's
-indentation is used when CLOSER-ALONE-BOL is non-nil, see
-`fancy-fill-paragraph--string-closer-alone-bol', otherwise the least
-indentation of the non-blank lines after it, the closer line when there
-are none.
+BODY-BEG starts the first line after the opener line, CLOSER-BOL starts
+the closer line, the same line when there are no lines between them.
+Returns a blank-space string, the least indentation of the lines
+continuing the opener line's paragraph.  When the opener line is a
+paragraph of its own (a summary line for e.g.), the closer line's
+indentation is used when CLOSER-ALONE is non-nil, the closer alone on
+its line (see `fancy-fill-paragraph--closer-line-kind'), otherwise the
+least indentation of the non-blank lines after it, the closer line when
+there are none.
 
 NOTE: a closer alone on its line is preferred to the text, which could
 be an indented example alone (a Python doc-test for e.g.), deeper than
@@ -1738,9 +1739,8 @@ the doc-string.  Otherwise the closer may be less indented than the text
 \(`\"\"\")' after an argument for e.g.), so the text is used."
   (declare (important-return-value t))
   (save-excursion
-    (goto-char (car inner-body))
-    (let ((closer-bol (1+ (cdr inner-body)))
-          (in-first-para t)
+    (goto-char body-beg)
+    (let ((in-first-para t)
           (para-indent nil)
           (body-col nil)
           (body-indent nil)
@@ -1763,7 +1763,7 @@ the doc-string.  Otherwise the closer may be less indented than the text
       (cond
        (para-indent
         para-indent)
-       ((and closer-alone-bol closer-indent)
+       ((and closer-alone closer-indent)
         closer-indent)
        (t
         (or body-indent closer-indent ""))))))
@@ -1872,37 +1872,72 @@ is rather than filled."
            (<= (- (pos-eol) closer-bol) prefix-col))
          closer-bol)))
 
-(defun fancy-fill-paragraph--block-comment-prefixed-closer-p (beg end cont-prefix)
-  "Return non-nil when the closer line of the comment in BEG..END has CONT-PREFIX.
+(defun fancy-fill-paragraph--block-comment-prefixed-closer-p (closer-bol end cont-prefix)
+  "Return non-nil when the closer line from CLOSER-BOL to END has CONT-PREFIX.
 Such a line (e.g. ` * text */') is laid out as the body lines are."
   (declare (important-return-value t))
-  (let ((closer-bol (fancy-fill-paragraph--closer-line-bol beg end)))
-    (and closer-bol
-         (string-prefix-p cont-prefix (buffer-substring-no-properties closer-bol end)))))
+  (string-prefix-p cont-prefix (buffer-substring-no-properties closer-bol end)))
 
-(defun fancy-fill-paragraph--block-comment-unprefixed-closer-p
-    (inner-body closer-bol closer-end cont-prefix)
-  "Return non-nil when the closer line joins a body laid out without CONT-PREFIX.
-INNER-BODY is the body bounds, CLOSER-BOL starts the closer line and
-CLOSER-END follows the closer.  Such a body (text indented without the
-` * ' of `comment-continue', as GNU style comments are for e.g.) is
-filled without stripping the prefix, so the closer line can join it.
-It must hold text before the closer.  Only the body's last line is
-checked, the closer line joins its paragraph, an empty line counts as
-unprefixed."
+(defun fancy-fill-paragraph--block-comment-unprefixed-body-p (inner-body cont-prefix)
+  "Return non-nil when the comment body INNER-BODY is laid out without CONT-PREFIX.
+Such a body (text indented without the ` * ' of `comment-continue', as
+GNU style comments are for e.g.) is filled without stripping the prefix,
+so text on the closer line can join it.  Only the body's last line is
+checked, the closer line joins its paragraph.  An empty line counts as
+unprefixed, as does no body at all (a comment spanning two lines)."
   (declare (important-return-value t))
-  (and (save-excursion
-         (goto-char (cdr inner-body))
-         (goto-char (pos-bol))
-         (not (fancy-fill-paragraph--line-matches-prefix-p cont-prefix)))
-       (save-excursion
-         ;; Text before the closer, a closer alone is a single word.
-         ;; Its characters have no common syntax to skip (`*)' in
-         ;; `pascal-mode' ends with a close parenthesis for e.g.).
-         (goto-char closer-bol)
-         (skip-chars-forward " \t" closer-end)
-         (skip-chars-forward "^ \t" closer-end)
-         (< (point) closer-end))))
+  (or (null inner-body)
+      (save-excursion
+        (goto-char (cdr inner-body))
+        (goto-char (pos-bol))
+        (not (fancy-fill-paragraph--line-matches-prefix-p cont-prefix)))))
+
+(defun fancy-fill-paragraph--closer-line-kind (closer-bol end closer-end inner-body cont-prefix)
+  "Return how the closer line of a comment or string is filled.
+CLOSER-BOL starts the closer line, nil when the closer is on the opener
+line, see `fancy-fill-paragraph--closer-line-bol'.  END is the region
+end, the end of the closer line.  CLOSER-END follows the closer, nil for
+a string that never closes.  INNER-BODY is the body bounds, see
+`fancy-fill-paragraph--comment-or-string-body-bounds'.  CONT-PREFIX is
+a block comment's continuation prefix, nil for a string.
+The result is one of:
+- `blocked' Code follows the closer, the closer line is never filled.
+- `alone'   Only the closer is on its line, the line stays as it is.
+            For a comment, text glued to the closer is kept with it
+            (`bbb.*/' for e.g.), the line's only non-blank run.
+- `joins'   Text before the closer, laid out so it can join the last
+            paragraph.  A closer on the opener line joins too.
+- `kept'    Text before the closer, laid out unlike the body, the line
+            stays as it is.  Block comments only."
+  (declare (important-return-value t))
+  (cond
+   ((or (null closer-end) (fancy-fill-paragraph--code-after-closer-p closer-end))
+    'blocked)
+   ((null closer-bol)
+    'joins)
+   ((save-excursion
+      (goto-char closer-bol)
+      (skip-chars-forward " \t" closer-end)
+      (cond
+       ;; A comment closer's characters have no common syntax to skip
+       ;; (`*)' in `pascal-mode' ends with a close parenthesis for e.g.),
+       ;; so the closer is taken to be the line's only non-blank run.
+       (cont-prefix
+        (skip-chars-forward "^ \t" closer-end))
+       (t
+        (skip-syntax-forward fancy-fill-paragraph--string-delimiter-syntax closer-end)))
+      (= (point) closer-end))
+    'alone)
+   ;; NOTE: a comment body is filled by stripping the prefix width from
+   ;; each line, a closer line of another shape would be cut into,
+   ;; dropping text or leaving the comment unclosed.  So only a line laid
+   ;; out as the body is joins, or any line when the body is not stripped.
+   ((or (null cont-prefix)
+        (fancy-fill-paragraph--block-comment-prefixed-closer-p closer-bol end cont-prefix)
+        (fancy-fill-paragraph--block-comment-unprefixed-body-p inner-body cont-prefix))
+    'joins)
+   (t
+    'kept)))
 
 (defun fancy-fill-paragraph--block-comment-inline-lines
     (beg end opener-col prefix-col cont-prefix verbatim-closer-bol)
@@ -1987,9 +2022,10 @@ paragraphs only when the line starts with the continuation prefix
                 (goto-char comment-start-pos)
                 (forward-comment 1)
                 (point)))
-             ;; Code after the closer shares the region; reflowing it
-             ;; as comment text would corrupt it.
-             (closer-blocked (fancy-fill-paragraph--code-after-closer-p closer-end)))
+             (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
+             (closer-kind
+              (fancy-fill-paragraph--closer-line-kind
+               closer-bol end closer-end inner-body cont-prefix)))
         (fancy-fill-paragraph--fill-syntax-region
          beg end inner-body
          (lambda ()
@@ -2003,22 +2039,10 @@ paragraphs only when the line starts with the continuation prefix
               (fancy-fill-paragraph--fill-block-comment-body para-beg para-end cont-prefix))
             (or sel-beg pos)
             (or sel-end pos)
-            ;; Only a closer line laid out as the body is joins the last paragraph.
-            ;; NOTE: the body is filled by stripping the prefix width from each
-            ;; line, a closer line of another shape (e.g. `  */' or ` **/') would
-            ;; be cut into, dropping text or leaving the comment unclosed.
-            ;; So such a line is kept as it is.  A body laid out without the
-            ;; prefix is not stripped, so its closer line joins.
-            (and
-             (not closer-blocked)
-             (or
-              (fancy-fill-paragraph--block-comment-prefixed-closer-p beg end cont-prefix)
-              (fancy-fill-paragraph--block-comment-unprefixed-closer-p
-               inner-body (fancy-fill-paragraph--closer-line-bol beg end) closer-end cont-prefix))
-             end)))
+            (and (eq closer-kind 'joins) end)))
          (lambda ()
            (cond
-            (closer-blocked
+            ((eq closer-kind 'blocked)
              nil)
             (t
              (fancy-fill-paragraph--fill-block-comment-inline
@@ -2067,52 +2091,33 @@ while text on the closer line joins the last paragraph."
           (when inner-body
             (fancy-fill-paragraph--string-opener-info opener-pos)))
          (closer-end (fancy-fill-paragraph--string-end opener-pos))
-         ;; Code after the closer shares the region; reflowing it as
-         ;; string text would corrupt it.  A string that never closes
-         ;; has no closer to locate, treat it the same way.
-         (closer-blocked
-          (or (null closer-end) (fancy-fill-paragraph--code-after-closer-p closer-end)))
-         ;; A closer on its own line stays there in both fills below.
-         (closer-alone-bol (fancy-fill-paragraph--string-closer-alone-bol beg end))
+         (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
+         (closer-kind
+          (fancy-fill-paragraph--closer-line-kind closer-bol end closer-end inner-body nil))
          (cont-prefix
           (when (and inner-body (plist-get opener-info :text))
-            (fancy-fill-paragraph--string-continuation-prefix inner-body closer-alone-bol))))
+            (fancy-fill-paragraph--string-continuation-prefix
+             (car inner-body) closer-bol (eq closer-kind 'alone)))))
     (fancy-fill-paragraph--fill-syntax-region
      beg end inner-body
      (lambda ()
-       (fancy-fill-paragraph--fill-multiline-syntax-body
-        beg
-        inner-body
-        (or cont-prefix "")
-        (plist-get opener-info :prefix)
-        (plist-get opener-info :text)
-        #'fancy-fill-paragraph--fill-region
-        (or sel-beg (point))
-        (or sel-end (point))
-        (and (not closer-blocked) (not closer-alone-bol) end)))
+       (fancy-fill-paragraph--fill-multiline-syntax-body beg
+                                                         inner-body
+                                                         (or cont-prefix "")
+                                                         (plist-get opener-info :prefix)
+                                                         (plist-get opener-info :text)
+                                                         #'fancy-fill-paragraph--fill-region
+                                                         (or sel-beg (point))
+                                                         (or sel-end (point))
+                                                         (and (eq closer-kind 'joins) end)))
      (lambda ()
        (cond
-        (closer-blocked
+        ((eq closer-kind 'blocked)
          nil)
-        (closer-alone-bol
-         (fancy-fill-paragraph--fill-region beg (1- closer-alone-bol)))
+        ((eq closer-kind 'alone)
+         (fancy-fill-paragraph--fill-region beg (1- closer-bol)))
         (t
          (fancy-fill-paragraph--fill-region beg end)))))))
-
-(defun fancy-fill-paragraph--string-closer-alone-bol (beg end)
-  "Return the start of the closer line of the string in BEG..END, or nil.
-It is returned when the string ends on a line of its own, holding only
-blank-space and the closing delimiter."
-  (declare (important-return-value t))
-  (let ((closer-bol (fancy-fill-paragraph--closer-line-bol beg end)))
-    (and closer-bol
-         (save-excursion
-           (goto-char closer-bol)
-           (skip-chars-forward " \t" end)
-           (skip-syntax-forward fancy-fill-paragraph--string-delimiter-syntax end)
-           (skip-chars-forward " \t" end)
-           (= (point) end))
-         closer-bol)))
 
 (defun fancy-fill-paragraph--replace-region (beg end result)
   "Replace the region BEG..END with RESULT when it differs.
