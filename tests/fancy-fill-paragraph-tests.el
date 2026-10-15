@@ -1748,6 +1748,20 @@ the first list item or the first indentation group."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-abbreviation-double-space-collapsed ()
+  "A double space after a dotted abbreviation is collapsed to one.
+It can't be told apart from an abbreviation within a sentence, a
+known limitation, see `fancy-fill-paragraph--maybe-double-space'.
+The double space after an ordinary sentence end is kept."
+  (let ((text-initial "He moved to the U.S.  Then he left.  Alpha beta gamma.\n")
+        (text-expected "He moved to the U.S. Then he left.  Alpha beta gamma.\n")
+        (fill-column 70)
+        (sentence-end-double-space t))
+    (with-fancy-fill-paragraph-test text-initial
+      (goto-char 2)
+      (fancy-fill-paragraph)
+      (should (equal text-expected (buffer-string))))))
+
 (ert-deftest fill-sentence-double-space-preserved-with-double-space ()
   "Double space after a sentence period should be preserved."
   (let ((text-initial "alpha beta.  Gamma delta epsilon zeta eta theta\n")
@@ -4863,6 +4877,34 @@ a closer such as `  */' and leaving the comment unclosed."
            (concat "/* aaa bbb ccc ddd\n"
                    " * eee fff ggg hhh\n"
                    closer "\n")))))))
+
+(ert-deftest fill-syntax-bounds-closer-after-abbreviation ()
+  "A closer after a dotted abbreviation keeps a single space before it.
+A double space typed before the closer was kept, it's collapsed as
+within the text.  The last case is a preservation case, a sentence end
+is still doubled."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space t))
+    (dolist (case
+             (list
+              (list #'c-mode 0 "/* Use U.S. */\n" "/* Use U.S. */\n")
+              (list #'c-mode 0 "/* Aaa bbb\n * use U.S. */\n" "/* Aaa bbb use U.S. */\n")
+              ;; A later paragraph, filled without a prefix.
+              (list
+               #'c-mode 2 "/* Aaa.\n\n   Bbb\n   use U.S. */\n" "/* Aaa.\n\n   Bbb use U.S. */\n")
+              (list
+               #'python-mode
+               3
+               "def f():\n    \"\"\"Aaa.\n\n    Bbb\n    use U.S. \"\"\"\n"
+               "def f():\n    \"\"\"Aaa.\n\n    Bbb use U.S. \"\"\"\n")
+              (list #'c-mode 0 "/* Use U.S.  */\n" "/* Use U.S. */\n")
+              ;; Preservation.
+              (list #'c-mode 0 "/* End. */\n" "/* End.  */\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column 70))
+          (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
 
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-bare-separator-width ()
   "A bare ` *' separator line does not widen the paragraph above it.
