@@ -579,6 +579,34 @@ preservation case, a comment still fills."
            0
            "# aaa bbb ccc ddd eee fff ggg\n# hhh iii jjj\nkey = \"x\"\n"))))))
 
+(ert-deftest fill-syntax-bounds-conf-mode-keys-without-strings-untouched ()
+  "Keys and section headers without a comment or string are never merged.
+Only those beside a comment or string were left alone, others were
+filled as prose into one line.  The last cases are preservation cases,
+a comment still fills, by the cursor and by a selection, and a code
+paragraph in a programming mode still falls back to a prose fill."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (mode (list #'conf-unix-mode #'conf-toml-mode #'conf-javaprop-mode))
+      (with-temp-buffer
+        (funcall mode)
+        (let ((inhibit-message t)
+              (text "[sec]\nkey = 1\nother = 2\n"))
+          (dotimes (line-index 3)
+            (should-fill-same-from-every-position text line-index text))
+          (should-fill-selection text 0 text)
+          ;; Preservation.
+          (let ((text-initial "# aaa bbb ccc ddd eee fff ggg hhh iii jjj\n\n[sec]\nkey = 1\n")
+                (text-expected "# aaa bbb ccc ddd eee fff ggg\n# hhh iii jjj\n\n[sec]\nkey = 1\n"))
+            (should-fill-same-from-every-position text-initial 0 text-expected)
+            (should-fill-selection text-initial 0 text-expected)))))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position
+         "int x = 1;\nint y = 2;\n" 0 "int x = 1; int y = 2;\n")))))
+
 (ert-deftest fill-syntax-bounds-python-line-comment-leading-code-untouched ()
   "Code sharing a line before a Python comment must not be reflowed."
   (let ((fancy-fill-paragraph-syntax-bounds t)

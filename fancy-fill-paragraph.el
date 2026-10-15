@@ -105,8 +105,9 @@ in programming and configuration modes, and in other modes where a
 double quote opens a string, other than prose modes such as `org-mode'.
 Filling a paragraph that holds code beside a comment or string leaves
 it alone rather than reflowing it as prose, which would merge the code
-into the comment text.  This reports no changes, the same as an
-already filled paragraph."
+into the comment text.  In configuration modes a paragraph of code
+alone (keys and section headers) is left alone too.  This reports no
+changes, the same as an already filled paragraph."
   :type 'boolean)
 
 
@@ -1384,13 +1385,28 @@ unlisted mode with strings is taken for code, the lesser harm."
       (and (eq (char-syntax ?\") ?\")
            (not (derived-mode-p 'org-mode 'sgml-mode 'nroff-mode 'fundamental-mode)))))
 
+(defun fancy-fill-paragraph--text-outside-regions-is-code-p ()
+  "Return non-nil when all text outside comments and strings is code.
+This is limited to configuration modes, where such text is keys and
+section headers, never prose.
+NOTE: a programming mode may hold prose outside its comments (a buffer
+of notes in `c-mode' for e.g.), filling a paragraph without a comment
+or string there falls back to a prose fill, so it isn't included."
+  (declare (important-return-value t))
+  (derived-mode-p 'conf-mode))
+
 (defun fancy-fill-paragraph--refuse-regions-p (starts has-code)
   "Return non-nil when a prose fill must be refused for STARTS and HAS-CODE.
 Both are from `fancy-fill-paragraph--range-syntax-regions'.  Code
 beside a comment or string would merge into its text, see
-`fancy-fill-paragraph--text-beside-regions-is-code-p'."
+`fancy-fill-paragraph--text-beside-regions-is-code-p'.  Code alone is
+refused too where no text outside them is prose, see
+`fancy-fill-paragraph--text-outside-regions-is-code-p'."
   (declare (important-return-value t))
-  (and starts has-code (fancy-fill-paragraph--text-beside-regions-is-code-p) t))
+  (and has-code
+       (or (and starts (fancy-fill-paragraph--text-beside-regions-is-code-p))
+           (fancy-fill-paragraph--text-outside-regions-is-code-p))
+       t))
 
 (defun fancy-fill-paragraph--fill-region-refuse-p (beg end)
   "Return non-nil when a prose fill of BEG..END must be refused.
@@ -1407,8 +1423,10 @@ A paragraph holding only comments and strings fills them with their own
 fillers, restricted to the selection, as the cursor path would.  Other
 paragraphs fill as prose, except those holding code beside a comment or
 string, which are left alone, as are the comments and strings they
-open.  A comment that never closes is left alone too.  The line a
-comment or string closes on fills with it, not as prose.  Where text
+open.  So is a paragraph of code alone in a configuration mode, see
+`fancy-fill-paragraph--text-outside-regions-is-code-p'.  A comment that
+never closes is left alone too.  The line a comment or string closes on
+fills with it, not as prose.  Where text
 beside comments and strings is prose every paragraph fills as prose,
 see `fancy-fill-paragraph--text-beside-regions-is-code-p'.
 Return non-nil when the buffer was modified."
@@ -1437,7 +1455,8 @@ Return non-nil when the buffer was modified."
         (cond
          (covered
           nil)
-         ;; Code beside a comment or string is left alone.
+         ;; Code beside a comment or string is left alone, as is code
+         ;; alone in a configuration mode.
          ((fancy-fill-paragraph--refuse-regions-p starts (cdr regions))
           nil)
          ;; Comments and strings only.
@@ -2815,7 +2834,8 @@ Returns non-nil when the buffer was modified."
           (goto-char saved-point)
           (set-marker saved-point nil))))
      ;; Point is on code beside a comment or string, leave the buffer
-     ;; alone rather than merge the code into it.
+     ;; alone rather than merge the code into it.  Code alone is left
+     ;; alone too in a configuration mode, where it's never prose.
      ;;
      ;; NOTE: this walks BEG..END a second time, with its own notion of
      ;; where comments and strings begin and end.  Reusing the scan
