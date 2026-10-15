@@ -133,6 +133,17 @@ Argument _POS is ignored."
                 (not (memq (aref text (1- split-pos)) '(?, ?\; ?:)))
                 (memq (aref text (- split-pos 2)) '(?. ?? ?! ?\u2026))))))
 
+(defsubst fancy-fill-paragraph--dotted-abbreviation-boundary-p (text split-pos)
+  "Return non-nil when TEXT before SPLIT-POS ends with a dotted abbreviation."
+  (declare (important-return-value t))
+  (and (> split-pos 1)
+       (eq (aref text (1- split-pos)) ?.)
+       (let ((start split-pos))
+         (while (and (> start 0) (not (memq (aref text (1- start)) '(?\s ?\t ?\n))))
+           (setq start (1- start)))
+         (string-match-p
+          "\\`\\(?:[[:alpha:]]\\.\\)\\{2,\\}\\'" (substring text start split-pos)))))
+
 (defsubst fancy-fill-paragraph--maybe-double-space (sep text split-pos)
   "Upgrade SEP to double-space when TEXT at SPLIT-POS follows a sentence end.
 When `sentence-end-double-space' is active and the
@@ -152,17 +163,6 @@ for such a rare case, so accept the limitation."
     "  ")
    (t
     sep)))
-
-(defsubst fancy-fill-paragraph--dotted-abbreviation-boundary-p (text split-pos)
-  "Return non-nil when TEXT before SPLIT-POS ends with a dotted abbreviation."
-  (declare (important-return-value t))
-  (and (> split-pos 1)
-       (eq (aref text (1- split-pos)) ?.)
-       (let ((start split-pos))
-         (while (and (> start 0) (not (memq (aref text (1- start)) '(?\s ?\t ?\n))))
-           (setq start (1- start)))
-         (string-match-p
-          "\\`\\(?:[[:alpha:]]\\.\\)\\{2,\\}\\'" (substring text start split-pos)))))
 
 (defsubst fancy-fill-paragraph--delimiter-entry-weight (entry)
   "Return the effective weight for delimiter ENTRY.
