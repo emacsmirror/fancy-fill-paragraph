@@ -98,9 +98,11 @@ Set to nil to disable dot-point detection entirely."
 
 (defcustom fancy-fill-paragraph-syntax-bounds t
   "When non-nil, constrain paragraphs to syntax boundaries.
-In programming modes this treats each comment or string as a separate
-paragraph, preventing `fancy-fill-paragraph' from merging text across
-distinct comments or strings.
+Each comment, and each string where text beside it is code, is filled
+as a separate paragraph, preventing `fancy-fill-paragraph' from merging
+text across distinct comments or strings.  Text beside a string is code
+in programming and configuration modes, and in other modes where a
+double quote opens a string, other than prose modes such as `org-mode'.
 Filling a paragraph that holds code beside a comment or string leaves
 it alone rather than reflowing it as prose, which would merge the code
 into the comment text.  This reports no changes, the same as an
@@ -1365,11 +1367,22 @@ is then incomplete."
 
 (defun fancy-fill-paragraph--text-beside-regions-is-code-p ()
   "Return non-nil when text beside comments and strings is code.
-This is limited to programming modes, `org-mode' and `conf-mode' set
-`comment-start' yet give a double quote string syntax, so quoted prose
-would otherwise be taken for code."
+It's code in programming and configuration modes, and in other modes
+where a double quote opens a string, unless the mode's text is prose
+(`org-mode' for e.g.), so quoted prose would otherwise be taken for
+code.  Where a double quote is punctuation (`latex-mode' for e.g.) the
+text beside a comment is prose, taken for code a paragraph with a
+trailing comment would never fill.
+NOTE: prose modes are listed rather than data modes, a data mode can't
+be told from prose by its parents (`yaml-ts-mode' derives from
+`text-mode' for e.g.), however its double quote opens a string.  Taken
+for prose, keys beside a quoted value are merged into one line, taken
+for code, prose beside a quote or comment is left as it is.  So an
+unlisted mode with strings is taken for code, the lesser harm."
   (declare (important-return-value t))
-  (derived-mode-p 'prog-mode))
+  (or (derived-mode-p 'prog-mode 'conf-mode)
+      (and (eq (char-syntax ?\") ?\")
+           (not (derived-mode-p 'org-mode 'sgml-mode 'nroff-mode 'fundamental-mode)))))
 
 (defun fancy-fill-paragraph--refuse-regions-p (starts has-code)
   "Return non-nil when a prose fill must be refused for STARTS and HAS-CODE.
@@ -1395,8 +1408,9 @@ fillers, restricted to the selection, as the cursor path would.  Other
 paragraphs fill as prose, except those holding code beside a comment or
 string, which are left alone, as are the comments and strings they
 open.  A comment that never closes is left alone too.  The line a
-comment or string closes on fills with it, not as prose.  Outside
-programming modes every paragraph fills as prose.
+comment or string closes on fills with it, not as prose.  Where text
+beside comments and strings is prose every paragraph fills as prose,
+see `fancy-fill-paragraph--text-beside-regions-is-code-p'.
 Return non-nil when the buffer was modified."
   (let ((jobs nil))
     ;; Plan every paragraph before filling any, first to last, so a
@@ -1411,9 +1425,9 @@ Return non-nil when the buffer was modified."
              (covered (and covered-end (<= (cdr para) covered-end)))
              ;; A covered paragraph is not scanned, otherwise a doc-string
              ;; would be scanned to its end once for each of its paragraphs.
-             ;; Outside programming modes a quote in prose opens a string
-             ;; which may run into later paragraphs, so text is only prose,
-             ;; see `fancy-fill-paragraph--text-beside-regions-is-code-p'.
+             ;; Where text beside them is prose, a quote in prose opens a
+             ;; string which may run into later paragraphs, so text is only
+             ;; prose, see `fancy-fill-paragraph--text-beside-regions-is-code-p'.
              (regions
               (and fancy-fill-paragraph-syntax-bounds
                    (not covered)

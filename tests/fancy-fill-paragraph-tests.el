@@ -512,13 +512,15 @@ The comment guard must not disable filling for code-only text."
   "Quoted prose outside a programming mode still fills.
 Double quotes are string delimiters in the standard syntax table
 and `org-mode' also sets `comment-start', so the guard against
-filling code beside a string must not reach prose modes."
+filling code beside a string must not reach prose modes.
+`conf-mode' is not a prose mode, see
+`fill-syntax-bounds-conf-mode-keys-beside-strings-untouched'."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 30)
         (sentence-end-double-space nil)
         (text-initial "aaa \"bbb ccc\" ddd eee fff ggg hhh iii jjj\n")
         (text-expected "aaa \"bbb ccc\"\nddd eee fff ggg hhh iii jjj\n"))
-    (dolist (mode (list #'text-mode #'org-mode #'conf-mode))
+    (dolist (mode (list #'text-mode #'org-mode #'fundamental-mode))
       (with-temp-buffer
         (funcall mode)
         (let ((inhibit-message t))
@@ -526,6 +528,56 @@ filling code beside a string must not reach prose modes."
           (goto-char (point-min))
           (fancy-fill-paragraph)
           (should (equal text-expected (buffer-string))))))))
+
+(define-derived-mode
+ fancy-fill-paragraph-test-data-mode text-mode "Data"
+ "A data mode derived from `text-mode', a double quote opening a string.
+A stand-in for modes such as `yaml-ts-mode', whose grammar may be missing."
+ (modify-syntax-entry ?\" "\""))
+
+(ert-deftest fill-syntax-bounds-data-mode-keys-beside-strings-untouched ()
+  "Keys beside a quoted value are never merged in a data mode.
+Only programming modes took the text beside a string for code, so a
+mode derived from `text-mode' (`yaml-ts-mode' for e.g.) filled the
+whole paragraph as prose, merging its keys."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (fancy-fill-paragraph-test-data-mode)
+      (let ((inhibit-message t))
+        (let ((text "a: 1\nkey: \"aaa\"\nb: 2\n"))
+          (dotimes (line-index 3)
+            (should-fill-same-from-every-position text line-index text))
+          (should-fill-selection text 0 text))
+        (let ((text "a: 1\nkey: \"aaa bbb ccc ddd eee fff ggg\n  hhh iii\"\n"))
+          (should-fill-same-from-every-position text 0 text))))))
+
+(ert-deftest fill-syntax-bounds-conf-mode-keys-beside-strings-untouched ()
+  "Keys and section headers beside a quoted value are never merged.
+`conf-mode' was taken for prose, so a paragraph of them was filled into
+one line, from any line but the string's.  Text beside a string is code
+there, as in a programming mode.  The string's own line is left out, it
+fills the string as in a programming mode.  The last case is a
+preservation case, a comment still fills."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (mode (list #'conf-unix-mode #'conf-toml-mode #'conf-javaprop-mode))
+      (with-temp-buffer
+        (funcall mode)
+        (let ((inhibit-message t))
+          (let ((text "[package]\nname = \"foo\"\nversion = \"1.0\"\n"))
+            (dotimes (line-index 3)
+              (should-fill-same-from-every-position text line-index text))
+            (should-fill-selection text 0 text))
+          (let ((text "[section]\nkey = \"aaa bbb ccc ddd eee fff ggg hhh iii\"\nother = 1\n"))
+            (dolist (line-index (list 0 2))
+              (should-fill-same-from-every-position text line-index text)))
+          (should-fill-same-from-every-position
+           "# aaa bbb ccc ddd eee fff ggg hhh iii jjj\nkey = \"x\"\n"
+           0
+           "# aaa bbb ccc ddd eee fff ggg\n# hhh iii jjj\nkey = \"x\"\n"))))))
 
 (ert-deftest fill-syntax-bounds-python-line-comment-leading-code-untouched ()
   "Code sharing a line before a Python comment must not be reflowed."
