@@ -693,13 +693,14 @@ paragraph in a programming mode still falls back to a prose fill."
 (ert-deftest fill-syntax-bounds-unterminated-comment-still-fills ()
   "An unterminated comment is the normal state while typing one.
 The guard against filling code beside a comment must not suppress the
-fill when the range holds no code to merge into it."
+fill when the range holds no code to merge into it.  It's filled as a
+block comment, lines it wraps onto taking the continuation prefix."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 40)
         (sentence-end-double-space nil)
         (text-initial "/* aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp\n")
         (text-expected
-         (concat "/* aaa bbb ccc ddd eee fff ggg hhh iii\n" "jjj kkk lll mmm nnn ooo ppp\n")))
+         (concat "/* aaa bbb ccc ddd eee fff ggg hhh iii\n" " * jjj kkk lll mmm nnn ooo ppp\n")))
     (with-temp-buffer
       (c-mode)
       (let ((inhibit-message t))
@@ -1246,9 +1247,10 @@ never closes."
           (should-fill-same-from-every-position (nth 1 case) 1 (nth 2 case)))))))
 
 (ert-deftest fill-syntax-bounds-region-unclosed-block-comment ()
-  "Selecting a block comment that never closes leaves it alone.
-It has no job of its own.  A closed comment before it still fills as a
-comment, in the same paragraph or another."
+  "Selecting a block comment that never closes fills it as a block comment.
+It had no job of its own, so it was left alone, while the cursor filled
+it as prose, losing the continuation prefix.  It's filled to the end of
+its paragraph, after a closed comment in the same paragraph or another."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 30)
         (sentence-end-double-space nil)
@@ -1260,23 +1262,33 @@ comment, in the same paragraph or another."
         (text-expected-closed
          ;; format-next-line: off
          (concat "/* aaa bbb ccc ddd eee fff ggg\n"
-                 " * hhh iii jjj */\n")))
+                 " * hhh iii jjj */\n"))
+        (text-expected-unclosed
+         ;; format-next-line: off
+         (concat "/* A comment with quite a lot\n"
+                 " * of words in it so that it\n"
+                 " * wraps and more words here\n"
+                 " * too")))
     (with-temp-buffer
       (c-mode)
       (let ((inhibit-message t))
-        (should-fill-selection text-comment-unclosed 0 text-comment-unclosed)
+        (should-fill-selection text-comment-unclosed 0 text-expected-unclosed)
         (should-fill-selection
          (concat text-comment-closed "\n" text-comment-unclosed)
          0
-         (concat text-expected-closed "\n" text-comment-unclosed))
+         (concat text-expected-closed "\n" text-expected-unclosed))
         (should-fill-selection
          (concat text-comment-closed text-comment-unclosed)
          0
-         (concat text-expected-closed text-comment-unclosed))))))
+         (concat text-expected-closed text-expected-unclosed))
+        (dotimes (line-index 2)
+          (should-fill-same-from-every-position
+           text-comment-unclosed line-index text-expected-unclosed))))))
 
 (ert-deftest fill-syntax-bounds-region-unclosed-after-comment-beside-code ()
-  "A selected unclosed comment after one left alone beside code is left alone.
-Neither comment is changed, the closer of the first stays on its line."
+  "A selected unclosed comment after one left alone beside code fills on its own.
+The first comment isn't changed, its closer staying on its line, the
+unclosed comment filled as a block comment."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 30)
         (sentence-end-double-space nil)
@@ -1293,7 +1305,8 @@ Neither comment is changed, the closer of the first stays on its line."
                  "\n"
                  "ccc ddd eee fff ggg hhh iii jjj kkk\n"
                  "lll */\n"
-                 "/* mmm nnn ooo ppp qqq rrr sss ttt")))
+                 "/* mmm nnn ooo ppp qqq rrr sss\n"
+                 " * ttt")))
     (with-temp-buffer
       (c-mode)
       (let ((inhibit-message t))

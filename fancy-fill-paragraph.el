@@ -1217,6 +1217,17 @@ SEARCH-BOUNDS limits line-comment block expansion."
              :fill-fn #'fancy-fill-paragraph--fill-string-region
              :args (list syn-start sel-beg sel-end)
              :resume (point)))))
+       ;; Block comment that never closes (one being typed for e.g.), it runs
+       ;; to the end of the paragraph searched.
+       ((and (eq syn-start (fancy-fill-paragraph--comment-or-string-start-at (1+ syn-start)))
+             (equal (fancy-fill-paragraph--syntax-region-at syn-start) '(comment)))
+        (let ((end (or (cdr search-bounds) (point-max))))
+          (fancy-fill-paragraph--syntax-fill-job-create
+           :beg region-beg
+           :end end
+           :fill-fn #'fancy-fill-paragraph--fill-block-comment-region
+           :args (list syn-start sel-beg sel-end)
+           :resume end)))
        (t
         nil)))))
 
