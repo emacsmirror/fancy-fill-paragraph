@@ -5114,7 +5114,9 @@ Its lines can't be broken or joined without changing the string, a raw
 newline is an error in C and Python, a joined escape is another
 character.
 A newline after an escaped backslash isn't escaped, nor is a newline
-after another escape, both fill as before."
+after another escape, both fill as before.  With code after the closer,
+a string on two lines was left unfilled either way, a longer one already
+filled."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 30))
     (dolist (case
@@ -5135,6 +5137,10 @@ after another escape, both fill as before."
                #'python-mode
                "x = \"aaa bbb ccc ddd eee fff ggg \\\nhhh\"\n"
                "x = \"aaa bbb ccc ddd eee fff ggg \\\nhhh\"\n")
+              (list
+               #'python-mode
+               "x = \"\"\"aaa bbb ccc ddd eee fff ggg \\\nhhh\"\"\" + y\n"
+               "x = \"\"\"aaa bbb ccc ddd eee fff ggg \\\nhhh\"\"\" + y\n")
               ;; Preservation: no escaped newline.
               (list
                #'python-mode
@@ -5143,7 +5149,15 @@ after another escape, both fill as before."
               (list
                #'python-mode
                "x = \"\"\"aaa bbb\\n ccc ddd eee fff ggg\nhhh\"\"\"\n"
-               "x = \"\"\"aaa bbb\\n ccc ddd eee\nfff ggg hhh\"\"\"\n")))
+               "x = \"\"\"aaa bbb\\n ccc ddd eee\nfff ggg hhh\"\"\"\n")
+              (list
+               #'python-mode
+               "x = \"\"\"aaa bbb ccc ddd eee fff ggg \\\\\nhhh\"\"\" + y\n"
+               "x = \"\"\"aaa bbb ccc ddd eee fff\nggg \\\\\nhhh\"\"\" + y\n")
+              (list
+               #'python-mode
+               "x = \"\"\"aaa bbb\\n ccc ddd eee fff ggg\nhhh\"\"\" + y\n"
+               "x = \"\"\"aaa bbb\\n ccc ddd eee\nfff ggg\nhhh\"\"\" + y\n")))
       (with-temp-buffer
         (funcall (nth 0 case))
         (let ((inhibit-message t))
@@ -5505,16 +5519,53 @@ own marker."
             (should-fill-same-from-every-position (nth 0 case) line-index (nth 1 case))))))))
 
 (ert-deftest fill-syntax-bounds-two-line-region-fills-as-longer ()
-  "A string on two lines fills as a longer one of the same shape.
-Each case is followed by its longer form for contrast.  A string's
-closer alone on its line took the prose fill, continuing at the opener
-line's indentation, after code it broke the line before the opener.  It
-now continues at the closer's indentation, as with a line between them."
+  "A comment or string on two lines fills as a longer one of the same shape.
+Most cases are followed by their longer form for contrast, the others
+are preservation cases.  Code after the closer left a two-line region
+unfilled, a longer one fills its body.  A string's closer alone on its
+line took the prose fill, continuing at the opener line's indentation,
+after code it broke the line before the opener.  It now continues at
+the closer's indentation, as with a line between them.
+Each case is filled from the lines listed, the cursor on a closer line
+followed by code being on the code, below an empty line it's past the
+paragraph."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 20)
         (sentence-end-double-space nil))
     (dolist (case
              (list
+              ;; Code after the closer.
+              (list
+               #'c-mode
+               '(0)
+               nil
+               "/* aaa bbb ccc ddd eee fff ggg\n */ int x;\n"
+               "/* aaa bbb ccc ddd\n * eee fff ggg\n */ int x;\n")
+              (list
+               #'c-mode
+               '(0 1)
+               nil
+               "/* aaa bbb ccc ddd eee fff ggg\n * hhh\n */ int x;\n"
+               "/* aaa bbb ccc ddd\n * eee fff ggg hhh\n */ int x;\n")
+              (list
+               #'python-mode
+               '(1)
+               nil
+               "def f():\n    \"\"\"aaa bbb ccc ddd eee fff\n    \"\"\" + y\n"
+               "def f():\n    \"\"\"aaa bbb ccc\n    ddd eee fff\n    \"\"\" + y\n")
+              (list
+               #'python-mode
+               '(1 2)
+               nil
+               "def f():\n    \"\"\"aaa bbb ccc ddd eee fff\n    ggg\n    \"\"\" + y\n"
+               "def f():\n    \"\"\"aaa bbb ccc\n    ddd eee fff ggg\n    \"\"\" + y\n")
+              ;; Preservation: on one line the opener line is the closer line, never filled.
+              (list
+               #'c-mode
+               '(0)
+               nil
+               "/* aaa bbb ccc ddd eee fff ggg */ int x;\n"
+               "/* aaa bbb ccc ddd eee fff ggg */ int x;\n")
               ;; A string's closer alone.
               (list
                #'python-mode
@@ -5559,6 +5610,30 @@ now continues at the closer's indentation, as with a line between them."
             (should-fill-same-from-every-position (nth 3 case) line-index (nth 4 case)))
           (when (nth 2 case)
             (should-fill-selection (nth 3 case) 0 (nth 4 case))))))))
+
+(ert-deftest fill-syntax-bounds-two-line-region-code-after-closer-unchanged ()
+  "Code after a closer leaves a region with nothing to fill unchanged.
+The closer line is kept as it is, which on one line is the opener line,
+an opener line holding only the opener has no text, and a string that
+never closes has no closer line to keep, so each is left as it is."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list #'python-mode '(0) "x = \"\"\"aaa bbb ccc ddd eee fff ggg\"\"\" + y\n")
+              (list #'python-mode '(0) "x = \"aaa bbb ccc ddd eee fff ggg\" + y\n")
+              (list #'python-mode '(0 1) "x = \"\"\"aaa bbb ccc ddd eee fff\nggg hhh\n")
+              (list #'c-mode '(0 1) "/*\n   aaa bbb ccc ddd eee fff ggg hhh */ int x;\n")
+              (list
+               #'python-mode
+               '(1)
+               "def f():\n    \"\"\"\n    aaa bbb ccc ddd eee fff ggg hhh\"\"\" + y\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (dolist (line-index (nth 1 case))
+            (should-fill-same-from-every-position (nth 2 case) line-index (nth 2 case))))))))
 
 (ert-deftest fill-syntax-bounds-buffer-local-case-fold-search-carried ()
   "A buffer-local `case-fold-search' applies to dot-points in a comment.

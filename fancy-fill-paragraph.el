@@ -2368,10 +2368,12 @@ of its own, held out of the fill, see
             (buffer-substring-no-properties beg (point))))
          ;; NOTE: a closer alone on its line may be wider than the prefix
          ;; (` *)' beside `|' in `pascal-mode' for e.g.), filled as text it
-         ;; would take the prefix, so it's kept too.
+         ;; would take the prefix, so it's kept too, as is a closer line
+         ;; with code after it, the code is never reflowed.
          (verbatim-closer-bol
           (or (fancy-fill-paragraph--block-comment-inline-closer beg end prefix-col)
-              (and (eq closer-kind 'alone) (fancy-fill-paragraph--closer-line-bol beg end)))))
+              (and (memq closer-kind '(alone blocked))
+                   (fancy-fill-paragraph--closer-line-bol beg end)))))
     ;; A verbatim closer line is left in place, the fill ends before it.
     (fancy-fill-paragraph--fill-prefixed-paragraph
      (fancy-fill-paragraph--block-comment-inline-lines
@@ -2470,7 +2472,8 @@ continuation prefix (` * text */') or without it (`   text */')."
             closer))
          (lambda ()
            (cond
-            ((eq closer-kind 'blocked)
+            ;; Code after a closer on the opener line leaves no line to fill.
+            ((and (eq closer-kind 'blocked) (null closer-bol))
              nil)
             (t
              (fancy-fill-paragraph--fill-block-comment-inline beg
@@ -2599,7 +2602,11 @@ line's indentation."
         ;; leave it as it is.
         ((and (null closer-bol) (not (plist-get opener-info :repeated)))
          nil)
-        ((eq closer-kind 'blocked)
+        ;; Code after the closer keeps the closer line as it is, only the
+        ;; opener line's text is filled, so this needs a closer line, a
+        ;; closer and text on the opener line.
+        ((and (eq closer-kind 'blocked)
+              (or (null closer-bol) (null closer-end) (null (plist-get opener-info :text))))
          nil)
         ;; Keep an escaped newline, as for the body's paragraphs above.
         ((fancy-fill-paragraph--string-escaped-newline-p beg (min (1+ end) (point-max)))
@@ -2660,7 +2667,7 @@ line's indentation."
            (fancy-fill-paragraph--fill-prefixed-paragraph
             lines beg
             (cond
-             ((eq closer-kind 'alone)
+             ((memq closer-kind '(alone blocked))
               (1- closer-bol))
              (t
               end))
