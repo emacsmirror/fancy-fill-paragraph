@@ -290,12 +290,16 @@ that carries CONT-PREFIX without its trailing space."
   (declare (important-return-value t))
   (string-prefix-p cont-prefix (concat (buffer-substring-no-properties (point) (pos-eol)) " ")))
 
-(defsubst fancy-fill-paragraph--move-past-line-prefix (prefix-column-width cont-prefix)
+(defsubst fancy-fill-paragraph--move-past-line-prefix
+    (prefix-column-width cont-prefix &optional strip-mark)
   "Move point past the prefix on the line at point.
 CONT-PREFIX, when non-nil, is the prefix the line is expected to carry.
 A line without it holds body text where the prefix should be, cutting
 PREFIX-COLUMN-WIDTH columns from that deletes the text, so only its
-leading blank-space is skipped.
+leading blank-space is skipped.  With STRIP-MARK, the prefix's mark is
+skipped after it too, when followed by the prefix's blank-space or
+nothing (` * ' a column off for e.g.), otherwise the mark would be taken
+for text.
 Pass it only for a synthesized prefix.  The comparison is literal, so a
 prefix read from the buffer rejects lines that reach the same column
 with different blank-space, tabs against spaces for instance."
@@ -303,7 +307,16 @@ with different blank-space, tabs against spaces for instance."
    ((or (null cont-prefix) (fancy-fill-paragraph--line-matches-prefix-p cont-prefix))
     (move-to-column prefix-column-width))
    (t
-    (skip-chars-forward " \t" (pos-eol)))))
+    (skip-chars-forward " \t" (pos-eol))
+    (let* ((mark (string-trim cont-prefix))
+           (mark-tail
+            (substring cont-prefix
+                       (+ (fancy-fill-paragraph--leading-indent cont-prefix) (length mark)))))
+      (when (and strip-mark
+                 (not (string-empty-p mark))
+                 (looking-at
+                  (concat (regexp-quote mark) "\\(?:" (regexp-quote mark-tail) "\\|$\\)")))
+        (goto-char (match-end 0)))))))
 
 (defsubst fancy-fill-paragraph--string-blank-or-empty-p (str)
   "Return non-nil if STR is empty or contains only blank-space and newlines."
@@ -1666,19 +1679,21 @@ when the body starts with a blank line, which holds none to read."
     opener-col)
    (fancy-fill-paragraph--block-comment-continuation-suffix comment-start-pos)))
 
-(defun fancy-fill-paragraph--block-comment-body-prefix-matches-p (body-beg body-end cont-prefix)
-  "Return non-nil when each line in BODY-BEG..BODY-END matches CONT-PREFIX.
-Blank prefix lines are accepted when they contain only CONT-PREFIX
-without its trailing space."
+(defun fancy-fill-paragraph--block-comment-paragraph-prefixed-p (para-beg para-end cont-prefix)
+  "Return non-nil when a line of the paragraph PARA-BEG..PARA-END has CONT-PREFIX.
+Other lines lose only their blank-space when the prefix is stripped.
+NOTE: a line with the prefix anywhere counts, the first line too, filled
+as prose such a paragraph lost the first line's indentation, a second
+fill taking it for a paragraph separator."
   (declare (important-return-value t))
   (save-excursion
-    (goto-char body-beg)
-    (let ((all-match t))
-      (while (and all-match (<= (point) body-end))
-        (unless (fancy-fill-paragraph--line-matches-prefix-p cont-prefix)
-          (setq all-match nil))
+    (goto-char para-beg)
+    (let ((prefixed nil))
+      ;; The last line may end the buffer, `forward-line' then stays on it.
+      (while (and (not prefixed) (<= (point) para-end) (not (eobp)))
+        (setq prefixed (fancy-fill-paragraph--line-matches-prefix-p cont-prefix))
         (forward-line 1))
-      all-match)))
+      prefixed)))
 
 (defun fancy-fill-paragraph--body-paragraph-bounds (body-beg body-end prefix-col sel-beg sel-end)
   "Return paragraph bounds in BODY-BEG..BODY-END overlapping SEL-BEG..SEL-END.
@@ -2070,21 +2085,27 @@ Returns non-nil when the buffer was modified."
 (defun fancy-fill-paragraph--fill-block-comment-body
     (body-beg body-end cont-prefix &optional closer)
   "Fill a separate-line block comment body from BODY-BEG to BODY-END.
-CLOSER, when non-nil, is the comment's closer ending the body, held out
-of the fill, see `fancy-fill-paragraph--lines-split-closer'."
+CLOSER, when non-nil, is the comment closer ending the body, held out of
+the fill, see `fancy-fill-paragraph--fill-prefixed-paragraph'.
+A paragraph with a line starting with CONT-PREFIX is filled with it,
+otherwise as prose."
   (cond
-   ((fancy-fill-paragraph--block-comment-body-prefix-matches-p body-beg body-end cont-prefix)
-    (fancy-fill-paragraph--fill-prefixed-region body-beg body-end cont-prefix
-                                                nil
-                                                nil
-                                                nil
-                                                nil
-                                                closer))
+   ((fancy-fill-paragraph--block-comment-paragraph-prefixed-p body-beg body-end cont-prefix)
+    (let ((prefix-col (fancy-fill-paragraph--string-column-width cont-prefix)))
+      ;; NOTE: the prefix is matched literally, so a line without it loses
+      ;; only its blank-space, as in the opener's paragraph.  Stripped of
+      ;; the prefix's width, a line indented past it kept the rest, taken
+      ;; for a deeper indented paragraph.
+      (fancy-fill-paragraph--fill-prefixed-paragraph (fancy-fill-paragraph--strip-region-lines
+                                                      body-beg
+                                                      (min (1+ body-end) (point-max)) prefix-col
+                                                      cont-prefix)
+                                                     body-beg body-end cont-prefix
+                                                     nil prefix-col closer)))
    (t
     ;; Prefix doesn't match body lines (e.g. XML comments),
     ;; fall back to standard fill.
-    (let ((fill-prefix cont-prefix))
-      (fancy-fill-paragraph--fill-region body-beg body-end nil closer)))))
+    (fancy-fill-paragraph--fill-region body-beg body-end nil closer))))
 
 (defun fancy-fill-paragraph--opener-prefix-and-text ()
   "Return a plist with :prefix and :text for the opener line at point.
@@ -2127,43 +2148,19 @@ is rather than filled."
            (<= (- (pos-eol) closer-bol) prefix-col))
          closer-bol)))
 
-(defun fancy-fill-paragraph--block-comment-prefixed-closer-p (closer-bol end cont-prefix)
-  "Return non-nil when the closer line from CLOSER-BOL to END has CONT-PREFIX.
-Such a line (e.g. ` * text */') is laid out as the body lines are."
-  (declare (important-return-value t))
-  (string-prefix-p cont-prefix (buffer-substring-no-properties closer-bol end)))
-
-(defun fancy-fill-paragraph--block-comment-unprefixed-body-p (inner-body cont-prefix)
-  "Return non-nil when the comment body INNER-BODY is laid out without CONT-PREFIX.
-Such a body (text indented without the ` * ' of `comment-continue', as
-GNU style comments are for e.g.) is filled without stripping the prefix,
-so text on the closer line can join it.  Only the body's last line is
-checked, the closer line joins its paragraph.  An empty line counts as
-unprefixed, as does no body at all (a comment spanning two lines)."
-  (declare (important-return-value t))
-  (or (null inner-body)
-      (save-excursion
-        (goto-char (cdr inner-body))
-        (goto-char (pos-bol))
-        (not (fancy-fill-paragraph--line-matches-prefix-p cont-prefix)))))
-
-(defun fancy-fill-paragraph--closer-line-kind (closer-bol end closer-end inner-body cont-prefix)
+(defun fancy-fill-paragraph--closer-line-kind (closer-bol closer-end cont-prefix)
   "Return how the closer line of a comment or string is filled.
 CLOSER-BOL starts the closer line, nil when the closer is on the opener
-line, see `fancy-fill-paragraph--closer-line-bol'.  END is the region
-end, the end of the closer line.  CLOSER-END follows the closer, nil for
-a string that never closes.  INNER-BODY is the body bounds, see
-`fancy-fill-paragraph--comment-or-string-body-bounds'.  CONT-PREFIX is
-a block comment's continuation prefix, nil for a string.
+line, see `fancy-fill-paragraph--closer-line-bol'.  CLOSER-END follows
+the closer, nil for a string that never closes.  CONT-PREFIX is a block
+comment's continuation prefix, nil for a string.
 The result is one of:
 - `blocked' Code follows the closer, the closer line is never filled.
 - `alone'   Only the closer is on its line, the line stays as it is.
             For a comment, text glued to the closer is kept with it
             (`bbb.*/' for e.g.), the line's only non-blank run.
-- `joins'   Text before the closer, laid out so it can join the last
-            paragraph.  A closer on the opener line joins too.
-- `kept'    Text before the closer, laid out unlike the body, the line
-            stays as it is.  Block comments only."
+- `joins'   Text before the closer, joining the last paragraph.  A
+            closer on the opener line joins too."
   (declare (important-return-value t))
   (cond
    ((or (null closer-end) (fancy-fill-paragraph--code-after-closer-p closer-end))
@@ -2183,16 +2180,13 @@ The result is one of:
         (skip-syntax-forward fancy-fill-paragraph--string-delimiter-syntax closer-end)))
       (= (point) closer-end))
     'alone)
-   ;; NOTE: a comment body is filled by stripping the prefix width from
-   ;; each line, a closer line of another shape would be cut into,
-   ;; dropping text or leaving the comment unclosed.  So only a line laid
-   ;; out as the body is joins, or any line when the body is not stripped.
-   ((or (null cont-prefix)
-        (fancy-fill-paragraph--block-comment-prefixed-closer-p closer-bol end cont-prefix)
-        (fancy-fill-paragraph--block-comment-unprefixed-body-p inner-body cont-prefix))
-    'joins)
+   ;; NOTE: a paragraph is filled with the prefix stripped, lines without
+   ;; it losing only their blank-space, or as prose, its least indentation
+   ;; stripped, so text on the closer line joins either way.  A mark
+   ;; without the prefix (` *ggg' for e.g.) is joined as text, telling a
+   ;; misplaced mark from text isn't worth the rules it takes.
    (t
-    'kept)))
+    'joins)))
 
 (defun fancy-fill-paragraph--block-comment-inline-lines
     (beg end opener-col prefix-col cont-prefix verbatim-closer-bol)
@@ -2276,10 +2270,8 @@ wider than the continuation prefix (` x */' beside ` * ' for e.g.),
 stays as it is, and code after the closer is never reflowed.  A closer
 joining the last paragraph is held out of the fill, put back on the
 last line when it fits, otherwise on a line of its own.
-Other text on the closer line joins the last paragraph, for body
-paragraphs only when the line starts with the continuation prefix
-\(e.g. ` * text */'), or the body is laid out without it
-\(e.g. `   text */')."
+Other text on the closer line joins the last paragraph, with the
+continuation prefix (` * text */') or without it (`   text */')."
   (let ((pos (point)))
     (save-excursion
       (comment-normalize-vars)
@@ -2299,8 +2291,7 @@ paragraphs only when the line starts with the continuation prefix
                 (point)))
              (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
              (closer-kind
-              (fancy-fill-paragraph--closer-line-kind
-               closer-bol end closer-end inner-body cont-prefix))
+              (fancy-fill-paragraph--closer-line-kind closer-bol closer-end cont-prefix))
              ;; A comment that never closes has no closer to hold out.
              (closer
               (fancy-fill-paragraph--closer-word
@@ -2390,8 +2381,7 @@ left as it is."
          (opener-info (fancy-fill-paragraph--string-opener-info opener-pos))
          (closer-end (fancy-fill-paragraph--string-end opener-pos))
          (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
-         (closer-kind
-          (fancy-fill-paragraph--closer-line-kind closer-bol end closer-end inner-body nil))
+         (closer-kind (fancy-fill-paragraph--closer-line-kind closer-bol closer-end nil))
          (closer (fancy-fill-paragraph--closer-word closer-kind closer-end beg))
          (cont-prefix
           (when (and inner-body (plist-get opener-info :text))
@@ -2521,14 +2511,25 @@ If PREFIX does not match every line, fall back to the minimum line indent."
   "Return region lines from BEG..END with PREFIX-COLUMN-WIDTH stripped.
 CONT-PREFIX, when non-nil, is the prefix the lines are expected to
 carry, see `fancy-fill-paragraph--move-past-line-prefix' for what it
-does and when it may be passed."
+does and when it may be passed.  A line's misplaced mark is stripped
+only when another line carries the prefix, without one a mark is a
+dot-point (`* item' in a comment laid out without the prefix for e.g.)."
   (declare (important-return-value t))
   (setq end (min end (point-max)))
   (save-excursion
-    (let ((result nil))
+    (let ((result nil)
+          (strip-mark
+           (and cont-prefix
+                (save-excursion
+                  (goto-char beg)
+                  (let ((found nil))
+                    (while (and (not found) (< (point) end))
+                      (setq found (fancy-fill-paragraph--line-matches-prefix-p cont-prefix))
+                      (forward-line 1))
+                    found)))))
       (goto-char beg)
       (while (< (point) end)
-        (fancy-fill-paragraph--move-past-line-prefix prefix-column-width cont-prefix)
+        (fancy-fill-paragraph--move-past-line-prefix prefix-column-width cont-prefix strip-mark)
         (push (buffer-substring-no-properties (point) (pos-eol)) result)
         (forward-line 1))
       (nreverse result))))

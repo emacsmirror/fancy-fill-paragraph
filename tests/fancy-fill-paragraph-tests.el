@@ -5316,7 +5316,8 @@ prefix the body's lines are given."
 The whole body was checked for the ` * ' prefix, which an empty line
 lacks, so the closer line joined the last paragraph and its prefixed
 lines were no longer joined.  Only the paragraph the closer joins is
-relevant."
+relevant.  The closer line is indented past the prefix, so it joins too,
+as it does a comment spanning two lines."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 70)
         (sentence-end-double-space nil))
@@ -5337,8 +5338,7 @@ relevant."
                (concat "/*\n"
                        " * aaa\n"
                        separator "\n"
-                       " * bbb bbb ccc\n"
-                       "   ddd */\n")))
+                       " * bbb bbb ccc ddd */\n")))
           (should-fill-same-from-every-position text-initial 3 text-expected)
           (should-fill-selection text-initial 0 text-expected))))))
 
@@ -5445,14 +5445,15 @@ taken for the region at point instead."
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-closer-without-prefix-kept ()
   "A closer line not starting with the continuation prefix is kept as it is.
 Filled as a body line, its prefix width would be stripped, cutting into
-a closer such as `  */' and leaving the comment unclosed."
+a closer such as `  */' and leaving the comment unclosed.  Text before
+the closer joins the body, it loses only its blank-space."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 20)
         (sentence-end-double-space nil))
     (with-temp-buffer
       (c-mode)
       (let ((inhibit-message t))
-        (dolist (closer '("  */" "   */" "    */" " **/" "  more */"))
+        (dolist (closer '("  */" "   */" "    */" " **/"))
           (dolist (opener '("/*" "/**"))
             (should-fill-same-from-every-position
              ;; format-next-line: off
@@ -5475,7 +5476,16 @@ a closer such as `  */' and leaving the comment unclosed."
            ;; format-next-line: off
            (concat "/* aaa bbb ccc ddd\n"
                    " * eee fff ggg hhh\n"
-                   closer "\n")))))))
+                   closer "\n")))
+        (dolist (opener '("/*" "/**"))
+          (should-fill-same-from-every-position
+           (concat opener "\n * bbb ccc ddd eee fff ggg hhh\n  more */\n")
+           1
+           (concat opener "\n * bbb ccc ddd eee\n * fff ggg hhh more\n */\n")))
+        (should-fill-same-from-every-position
+         "/* aaa\n * bbb ccc ddd eee fff ggg hhh\n  more */\n"
+         1
+         "/* aaa bbb ccc ddd\n * eee fff ggg hhh\n * more */\n")))))
 
 (ert-deftest fill-syntax-bounds-block-comment-region-closing-elsewhere-errors ()
   "A comment region its comment doesn't close in is an error, not filled.
@@ -5495,6 +5505,132 @@ region as comment text."
           (goto-char (point-min))
           (pos-eol))
         (point-min))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-closer-line-without-prefix-joins ()
+  "A closer line without the prefix joins a body with the prefix.
+It was kept, while a comment spanning two lines joined it, so a fill
+leaving two lines had a second fill join it.  Stripped of its
+blank-space alone, it loses no text, at any indentation."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list
+                   40
+                   0
+                   "/* Aaa bbb\n * Ccc ddd.\n   Eee fff. */\n"
+                   "/* Aaa bbb Ccc ddd. Eee fff. */\n")
+                  (list
+                   40
+                   2
+                   "/* Aaa.\n\n * Bbb ccc.\n   Ddd eee. */\n"
+                   "/* Aaa.\n\n * Bbb ccc. Ddd eee. */\n")
+                  (list
+                   40
+                   2
+                   "/* Aaa.\n\n * Bbb ccc.\n\tDdd eee. */\n"
+                   "/* Aaa.\n\n * Bbb ccc. Ddd eee. */\n")
+                  (list
+                   20
+                   2
+                   "/* Aaa.\n\n * Bbb ccc ddd\n   eee fff ggg. */\n"
+                   "/* Aaa.\n\n * Bbb ccc ddd eee\n * fff ggg. */\n")
+                  (list 40 2 "/* Aaa.\n\n * Bbb ccc.\n  x */\n" "/* Aaa.\n\n * Bbb ccc. x */\n")))
+          (let ((fill-column (nth 0 case)))
+            (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case))
+            (should-fill-selection (nth 2 case) 0 (nth 3 case))))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-closer-line-fills-stable ()
+  "A closer line is joined or kept as a second fill would, its text kept.
+Kept or joined by the layout of the body before the fill, which the
+fill then changed, a second fill could decide otherwise.  Lines without
+the prefix were stripped of its width, a deeper one wasn't joined but
+taken for an indented paragraph, others filled as prose, without the
+prefix a second fill gave them."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list 40 1 "/*\n * bbb ccc\n      ddd */\n" "/*\n * bbb ccc ddd */\n")
+                  (list
+                   30
+                   1
+                   "/*\n * aaa bbb ccc ddd eee fff ggg\n   hhh iii\n   jjj */\n"
+                   "/*\n * aaa bbb ccc ddd eee fff ggg\n * hhh iii jjj */\n")
+                  (list
+                   40
+                   0
+                   "/* aaa bbb ccc ddd eee fff\n   ggg hhh\n * iii */\n"
+                   "/* aaa bbb ccc ddd eee fff ggg hhh iii\n */\n")
+                  (list
+                   40
+                   0
+                   "/* aaa bbb ccc\n * ddd eee fff\n  ggg.  */\n"
+                   "/* aaa bbb ccc ddd eee fff ggg. */\n")))
+          (let ((fill-column (nth 0 case)))
+            (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case))
+            (should-fill-selection (nth 2 case) 0 (nth 3 case))))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-paragraph-starting-unprefixed-stable ()
+  "A paragraph with the prefix past its first line fills with the prefix.
+Its first line had to carry it, so a paragraph starting without it was
+filled as prose, losing the first line's indentation, which a second
+fill took for a paragraph separator."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list
+                   40
+                   "/*\n    aaa\n * bbb ccc\n * ddd eee fff ggg\n */\n"
+                   "/*\n * aaa bbb ccc ddd eee fff ggg\n */\n")
+                  (list
+                   30
+                   "\t/*\n\t   aaa.\n\t * bbb ccc ddd eee fff ggg hhh.\n\t  iii jjj */\n"
+                   "\t/*\n\t * aaa. bbb ccc ddd\n\t * eee fff ggg hhh.\n\t * iii jjj */\n")))
+          (let ((fill-column (nth 0 case)))
+            (dotimes (line-index (length (split-string (nth 1 case) "\n" t)))
+              (should-fill-same-from-every-position (nth 1 case) line-index (nth 2 case)))))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-misaligned-prefix-stripped ()
+  "A line whose prefix is a column off in a paragraph with the prefix loses it.
+Only its blank-space was stripped, its mark taken for text, then for a
+dot-point (` * * fff').  The last cases are preservation cases, a mark
+glued to text is text, and without a line carrying the prefix a mark is
+a dot-point."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 40))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list
+                   "/* Aaa.\n *\n * bbb ccc ddd eee\n  * fff ggg hhh\n */\n"
+                   "/* Aaa.\n *\n * bbb ccc ddd eee fff ggg hhh\n */\n")
+                  (list
+                   "/* Aaa.\n *\n * bbb ccc ddd eee\n* fff ggg hhh\n */\n"
+                   "/* Aaa.\n *\n * bbb ccc ddd eee fff ggg hhh\n */\n")
+                  ;; Preservation.
+                  (list
+                   "/* Aaa.\n *\n * bbb ccc ddd eee\n   *emph* fff\n */\n"
+                   "/* Aaa.\n *\n * bbb ccc ddd eee *emph* fff\n */\n")))
+          (dotimes (line-index 2)
+            (should-fill-same-from-every-position (nth 0 case) (+ 2 line-index) (nth 1 case))))
+        (should-fill-same-from-every-position
+         "/* Some intro text:\n   * first item\n   * second item.  */\n"
+         0
+         "/* Some intro text:\n * * first item\n * * second item. */\n")))))
 
 (ert-deftest fill-syntax-bounds-block-comment-wrapped-closer-alone ()
   "A closer wrapped onto a line of its own is laid out as a closer alone.
@@ -5565,6 +5701,25 @@ first line early so the closer was all that didn't fit."
           (let ((fill-column (nth 0 case)))
             (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case))
             (should-fill-selection (nth 1 case) 0 (nth 2 case))))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-unprefixed-body-tab-indent-kept ()
+  "A comment body without the prefix keeps its indentation as written.
+It was filled as prose, its indentation rebuilt from spaces, so a tab
+and three spaces became four, moving the text from column 11 to 4.
+Each result also fills unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 38))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list "\t/**\n\t   d hhh ff. i.e. */\n" "\t/**\n\t   d hhh ff. i.e. */\n")
+                  (list
+                   "\t/**\n\t   aaa bbb\n\t   ccc ddd */\n" "\t/**\n\t   aaa bbb ccc ddd */\n")))
+          (should-fill-same-from-every-position (nth 0 case) 1 (nth 1 case))
+          (should-fill-selection (nth 0 case) 0 (nth 1 case)))))))
 
 (ert-deftest fill-syntax-bounds-block-comment-closer-kept-on-last-line ()
   "A closer that fits stays on the last line, however the text breaks.
