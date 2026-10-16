@@ -5344,6 +5344,121 @@ now continues at the closer's indentation, as with a line between them."
           (when (nth 2 case)
             (should-fill-selection (nth 3 case) 0 (nth 4 case))))))))
 
+(ert-deftest fill-syntax-bounds-buffer-local-case-fold-search-carried ()
+  "A buffer-local `case-fold-search' applies to dot-points in a comment.
+The comment is filled in another buffer, which used the default value,
+so a prefix matched without case there, unlike in the buffer."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-dot-point-prefix (list "o "))
+        (sentence-end-double-space nil)
+        (fill-column 20))
+    (with-temp-buffer
+      (c-mode)
+      (setq-local case-fold-search nil)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position
+         "/* aaa bbb\n * O ccc ddd eee fff */\n" 0 "/* aaa bbb O ccc ddd\n * eee fff */\n")))))
+
+(ert-deftest fill-syntax-bounds-buffer-local-fill-settings ()
+  "Comments and strings fill with the buffer's own settings.
+Their text was filled in a temporary buffer, seeing the default value
+of `sentence-end-double-space', not the buffer's, while a closer after
+the text and a string filled in place saw the buffer's.  Each case sets
+the buffer's value against the default."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30))
+    (dolist (case
+             (list
+              (list
+               #'python-mode
+               t
+               nil
+               "x = \"\"\"Aaa bbb. Ccc ddd. Eee fff ggg hhh iii.\"\"\"\n"
+               "x = \"\"\"Aaa bbb. Ccc ddd.\nEee fff ggg hhh iii.\"\"\"\n")
+              (list
+               #'python-mode
+               t
+               nil
+               "x = \"\"\"Aaa bbb. Ccc ddd. Eee fff ggg hhh iii\njjj kkk lll.\"\"\"\n"
+               "x = \"\"\"Aaa bbb. Ccc ddd.\nEee fff ggg hhh iii jjj kkk\nlll.\"\"\"\n")
+              (list
+               #'c-mode
+               nil
+               t
+               "/* Aaa bbb. Ccc ddd. Eee fff ggg hhh iii jjj kkk. */\n"
+               "/* Aaa bbb.  Ccc ddd.  Eee fff\n * ggg hhh iii jjj kkk.  */\n")
+              (list
+               #'c-mode
+               t
+               nil
+               "/* Aaa bbb. Ccc ddd. Eee fff ggg hhh iii jjj kkk. */\n"
+               "/* Aaa bbb. Ccc ddd. Eee fff\n * ggg hhh iii jjj kkk. */\n")))
+      (let ((sentence-end-double-space (nth 1 case)))
+        (with-temp-buffer
+          (funcall (nth 0 case))
+          (setq-local sentence-end-double-space (nth 2 case))
+          (let ((inhibit-message t))
+            (should-fill-same-from-every-position (nth 3 case) 0 (nth 4 case))))))))
+
+(ert-deftest fill-syntax-bounds-buffer-local-option-carried ()
+  "This package's options local to the buffer apply to comments and strings.
+They're found by name, so an option isn't missed for not being listed.
+Missed, the text was filled with the default margin, while the closer
+after it used the buffer's."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-fill-column-margin 0)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'c-mode
+               "/* aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll */\n"
+               "/* aaa bbb ccc ddd eee\n * fff ggg hhh iii jjj\n * kkk lll */\n")
+              (list
+               #'python-mode
+               "x = \"\"\"aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\"\"\"\n"
+               "x = \"\"\"aaa bbb ccc ddd\neee fff ggg hhh iii jjj\nkkk lll\"\"\"\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (setq-local fancy-fill-paragraph-fill-column-margin 6)
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case)))))))
+
+(ert-deftest fill-syntax-bounds-default-fill-settings-unchanged ()
+  "Comments and strings in a buffer without local fill settings use the defaults.
+Carried over to the buffer the text is filled in, a value bound around
+the fill applies as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30))
+    (dolist (case
+             (list
+              (list
+               #'python-mode
+               t
+               "x = \"\"\"Aaa bbb. Ccc ddd. Eee fff ggg hhh iii.\"\"\"\n"
+               "x = \"\"\"Aaa bbb.  Ccc ddd.\nEee fff ggg hhh iii.\"\"\"\n")
+              (list
+               #'python-mode
+               nil
+               "x = \"\"\"Aaa bbb. Ccc ddd. Eee fff ggg hhh iii.\"\"\"\n"
+               "x = \"\"\"Aaa bbb. Ccc ddd.\nEee fff ggg hhh iii.\"\"\"\n")
+              (list
+               #'c-mode
+               t
+               "/* Aaa bbb. Ccc ddd. Eee fff ggg hhh iii jjj kkk. */\n"
+               "/* Aaa bbb.  Ccc ddd.  Eee fff\n * ggg hhh iii jjj kkk.  */\n")
+              (list
+               #'c-mode
+               nil
+               "/* Aaa bbb. Ccc ddd. Eee fff ggg hhh iii jjj kkk. */\n"
+               "/* Aaa bbb. Ccc ddd. Eee fff\n * ggg hhh iii jjj kkk. */\n")))
+      (let ((sentence-end-double-space (nth 1 case)))
+        (with-temp-buffer
+          (funcall (nth 0 case))
+          (let ((inhibit-message t))
+            (should-fill-same-from-every-position (nth 2 case) 0 (nth 3 case))))))))
+
 (ert-deftest fill-syntax-bounds-closer-before-closing-delimiters-fills ()
   "A closer followed by closing delimiters fills as one followed by nothing.
 Any text after the closer was taken for code, so a closer line ending

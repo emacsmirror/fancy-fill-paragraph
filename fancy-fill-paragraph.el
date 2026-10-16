@@ -872,6 +872,31 @@ the first entry in the table takes priority.")
 ;; ---------------------------------------------------------------------------
 ;; Private Functions
 
+(defconst fancy-fill-paragraph--fill-variables-builtin
+  '(sentence-end-double-space tab-width case-fold-search)
+  "Variables outside this package read while filling.
+See `fancy-fill-paragraph--fill-local-variables'.")
+
+(defun fancy-fill-paragraph--fill-local-variables ()
+  "Return the current buffer's fill settings as (VARIABLE . VALUE) pairs.
+These are `fancy-fill-paragraph--fill-variables-builtin', and each of
+this package's options local to the buffer.
+NOTE: options are read from the package's custom group rather than
+listed, so one added later can't be missed, using its default value in
+the buffer text is filled in, see
+`fancy-fill-paragraph--fill-paragraphs-in-string'.  Reading the
+buffer's local variables for them scanned every one of them, for each
+paragraph filled."
+  (declare (important-return-value t))
+  (let ((result
+         (mapcar
+          (lambda (var) (cons var (symbol-value var)))
+          fancy-fill-paragraph--fill-variables-builtin)))
+    (dolist (member (get 'fancy-fill-paragraph 'custom-group))
+      (when (and (eq (cadr member) 'custom-variable) (local-variable-p (car member)))
+        (push (cons (car member) (symbol-value (car member))) result)))
+    result))
+
 (defun fancy-fill-paragraph--fill-paragraphs-in-string
     (text local-fill-column &optional first-line-extra-width)
   "Fill each paragraph in TEXT independently within LOCAL-FILL-COLUMN.
@@ -889,17 +914,24 @@ holds the first line."
    ((fancy-fill-paragraph--string-blank-or-empty-p text)
     text)
    (t
-    (with-temp-buffer
-      (insert text)
-      (let* ((fill-column local-fill-column)
-             (fill-prefix "")
-             ;; Reverse ordered, so the opening paragraph is last.
-             (bounds (fancy-fill-paragraph--collect-paragraph-bounds (point-min) (point-max))))
-        (fancy-fill-paragraph--fill-paragraph-bounds (butlast bounds))
-        ;; The text is not blank, so there is an opening paragraph.
-        (let ((para (car (last bounds))))
-          (fancy-fill-paragraph--fill-region (car para) (cdr para) first-line-extra-width)))
-      (buffer-string)))))
+    (let ((bindings (fancy-fill-paragraph--fill-local-variables)))
+      (with-temp-buffer
+        ;; NOTE: a temporary buffer sees only the default values, the filled
+        ;; buffer's own (`sentence-end-double-space' set by a mode hook for
+        ;; e.g.) are carried over.  Otherwise text filled here would follow
+        ;; other settings than text filled in its buffer, or a closer after it.
+        (dolist (binding bindings)
+          (set (make-local-variable (car binding)) (cdr binding)))
+        (insert text)
+        (let* ((fill-column local-fill-column)
+               (fill-prefix "")
+               ;; Reverse ordered, so the opening paragraph is last.
+               (bounds (fancy-fill-paragraph--collect-paragraph-bounds (point-min) (point-max))))
+          (fancy-fill-paragraph--fill-paragraph-bounds (butlast bounds))
+          ;; The text is not blank, so there is an opening paragraph.
+          (let ((para (car (last bounds))))
+            (fancy-fill-paragraph--fill-region (car para) (cdr para) first-line-extra-width)))
+        (buffer-string))))))
 
 (defun fancy-fill-paragraph--fill-and-reprefix
     (lines local-fill-column cont-prefix &optional first-prefix first-line-extra-width)
