@@ -107,7 +107,12 @@ Filling a paragraph that holds code beside a comment or string leaves
 it alone rather than reflowing it as prose, which would merge the code
 into the comment text.  In configuration modes a paragraph of code
 alone (keys and section headers) is left alone too.  This reports no
-changes, the same as an already filled paragraph."
+changes, the same as an already filled paragraph.
+A line holding a line comment is left as it is when the prose around
+it is filled, a block comment (`<!-- -->' in `html-mode' for e.g.) is
+filled with the prose, remaining a comment.  Comments are found from
+the mode's syntax table, so a comment the syntax table doesn't mark
+\(`..' in `rst-mode' for e.g.) is filled as prose."
   :type 'boolean)
 
 
@@ -1590,6 +1595,45 @@ apply."
               (or (and (car regions) (fancy-fill-paragraph--text-beside-regions-is-code-p))
                   (fancy-fill-paragraph--text-outside-regions-is-code-p))
               t))))
+
+(defun fancy-fill-paragraph--fill-prose-region (beg end)
+  "Fill BEG..END as prose, a line holding a line comment left as it is.
+NOTE: a line comment ends with its line, so text joined after it would
+be commented out, and text it wrapped onto the next line uncommented
+\(prose beside a `%' comment in `latex-mode' for e.g.).  The lines
+between such lines are filled on their own, so a short line before or
+after one isn't joined to it.  A block comment ends with its closer,
+so it's filled with the prose, remaining a comment.  Wrapping the text
+before the comment would take the comment as one word, which the fill
+can't yet do, so leave as-is.
+Return non-nil when the buffer was modified."
+  (let ((runs nil)
+        (run-beg nil)
+        (done nil)
+        (changed nil))
+    (save-excursion
+      (goto-char beg)
+      (while (not done)
+        (cond
+         ((and fancy-fill-paragraph-syntax-bounds
+               (let ((ppss (save-excursion (syntax-ppss (pos-eol)))))
+                 (and (nth 4 ppss)
+                      (<= (pos-bol) (nth 8 ppss))
+                      (fancy-fill-paragraph--line-comment-syntax-start-p (nth 8 ppss)))))
+          (when run-beg
+            (push (cons run-beg (1- (pos-bol))) runs)
+            (setq run-beg nil)))
+         ((null run-beg)
+          (setq run-beg (max beg (pos-bol)))))
+        (setq done (or (>= (pos-eol) end) (not (zerop (forward-line 1))))))
+      (when run-beg
+        (push (cons run-beg end) runs)))
+    ;; Pushed first to last, so they fill last to first and earlier
+    ;; positions remain valid.
+    (dolist (run runs)
+      (when (fancy-fill-paragraph--fill-region (car run) (cdr run))
+        (setq changed t)))
+    changed))
 
 (defun fancy-fill-paragraph--fill-selection-paragraphs (beg end)
   "Fill the paragraphs the selection BEG..END touches, as the cursor would.
@@ -3349,7 +3393,7 @@ left alone, see `fancy-fill-paragraph--syntax-fill-jobs-in-range'."
       ((fancy-fill-paragraph--fill-region-refuse-p beg end)
        nil)
       (t
-       (fancy-fill-paragraph--fill-region beg end)))
+       (fancy-fill-paragraph--fill-prose-region beg end)))
      jobs)))
 
 (defun fancy-fill-paragraph--by-point-impl ()

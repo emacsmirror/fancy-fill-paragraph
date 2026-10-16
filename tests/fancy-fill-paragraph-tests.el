@@ -640,6 +640,62 @@ A string fills alone, as in a programming mode."
               (fill-column (nth 1 case)))
           (should-fill-same-from-every-position (nth 3 case) (nth 2 case) (nth 4 case)))))))
 
+(ert-deftest fill-syntax-bounds-prose-beside-comment-fills ()
+  "A line holding a line comment is left as it is when prose around it fills.
+The prose was filled with the comment as one paragraph, so in
+`latex-mode' text joined after the comment was commented out.  The
+lines around it fill on their own."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 30))
+    (with-temp-buffer
+      (latex-mode)
+      (let ((inhibit-message t))
+        (dotimes (line-index 2)
+          (should-fill-same-from-every-position
+           "Aaa bbb ccc. % note\nDdd eee fff.\n" line-index "Aaa bbb ccc. % note\nDdd eee fff.\n"))
+        (let ((text-initial
+               ;; format-next-line: off
+               (concat "Aaa bbb ccc ddd eee fff ggg hhh iii jjj.\n"
+                       "Kkk. % note\n"
+                       "Lll mmm nnn ooo ppp qqq rrr sss ttt uuu.\n"
+                       "Vvv www.\n"))
+              (text-expected
+               ;; format-next-line: off
+               (concat "Aaa bbb ccc ddd eee fff ggg\n"
+                       "hhh iii jjj.\n"
+                       "Kkk. % note\n"
+                       "Lll mmm nnn ooo ppp qqq rrr\n"
+                       "sss ttt uuu. Vvv www.\n")))
+          (should-fill-same-from-every-position text-initial 2 text-expected)
+          (should-fill-same-from-every-position text-initial 0 text-expected)
+          (should-fill-selection text-initial 0 text-expected))))))
+
+(ert-deftest fill-syntax-bounds-prose-without-line-comment-unchanged ()
+  "Prose without a line comment fills as one paragraph.
+A preservation case for `fill-syntax-bounds-prose-beside-comment-fills':
+an escaped `%' isn't a comment, nor is a `%' in `text-mode', prose in a
+programming mode still fills, code beside a comment is still left alone,
+and without syntax bounds the comment is joined as before."
+  (let ((sentence-end-double-space nil)
+        (fill-column 30))
+    (dolist (case
+             (list
+              (list t #'latex-mode "Aaa bbb\nccc ddd.\n" "Aaa bbb ccc ddd.\n")
+              (list t #'latex-mode "Aaa \\% bbb\nccc ddd.\n" "Aaa \\% bbb ccc ddd.\n")
+              (list
+               t #'text-mode "Aaa bbb. % note\nDdd eee fff.\n" "Aaa bbb. % note Ddd eee fff.\n")
+              (list t #'c-mode "aaa bbb\nccc ddd\n" "aaa bbb ccc ddd\n")
+              (list t #'c-mode "aaa bbb // note\nccc ddd\n" "aaa bbb // note\nccc ddd\n")
+              (list t #'emacs-lisp-mode "(foo) ; note\n(bar)\n" "(foo) ; note\n(bar)\n")
+              (list nil #'latex-mode "Aaa bbb. % note\nDdd eee.\n" "Aaa bbb. % note Ddd eee.\n")))
+      (let ((fancy-fill-paragraph-syntax-bounds (nth 0 case)))
+        (with-temp-buffer
+          (funcall (nth 1 case))
+          (let ((inhibit-message t))
+            (dotimes (line-index 2)
+              (should-fill-same-from-every-position (nth 2 case) line-index (nth 3 case)))))))))
+
 (ert-deftest fill-syntax-bounds-conf-mode-keys-beside-strings-untouched ()
   "Keys and section headers beside a quoted value are never merged.
 `conf-mode' was taken for prose, so a paragraph of them was filled into
@@ -1482,8 +1538,9 @@ its line, the unclosed comment filled as a block comment."
   "A selection fills the paragraphs it touches as the cursor fills each line.
 Paragraph bounds were read once before filling, a comment's fill moving
 the text after it, so later bounds fell in code, duplicating it.  Code
-lines beside a doc-string were filled as prose, and an empty selection
-filled nothing."
+lines beside a doc-string were filled as prose, a paragraph whose first
+line ends in a comment was filled with the comment, and an empty
+selection filled nothing."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (sentence-end-double-space nil))
     (with-temp-buffer
@@ -1510,6 +1567,14 @@ filled nothing."
             (fill-column 70)
             (text "def f():\n    \"\"\"Aaa bbb.\"\"\"\n    x = 1\n    y = 2\n"))
         (should-fill-selection text 2 text)))
+    (with-temp-buffer
+      (latex-mode)
+      (let ((inhibit-message t)
+            (fill-column 30))
+        (should-fill-selection
+         "Aaa bbb ccc % note\nddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp\n"
+         0
+         "Aaa bbb ccc % note\nddd eee fff ggg hhh iii jjj\nkkk lll mmm nnn ooo ppp\n")))
     (with-temp-buffer
       (c-mode)
       (let ((inhibit-message t)
