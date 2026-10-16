@@ -1738,23 +1738,31 @@ COMMENT-START-POS is the buffer position of the comment opener."
      " "))))
 
 (defun fancy-fill-paragraph--block-comment-continuation-prefix
-    (beg body opener-col comment-start-pos)
+    (beg body closer-bol opener-col comment-start-pos)
   "Return the full continuation prefix for a block comment.
 BEG is the region start, BODY is the body bounds, the closer line's for
-a comment on two lines, or nil on one line.  OPENER-COL is the opener
-column, and COMMENT-START-POS is the comment opener position.
-The indentation is read from the first body line, or the opener line
-when the body starts with a blank line, which holds none to read."
+a comment on two lines, or nil on one line.  CLOSER-BOL starts the closer
+line or nil, OPENER-COL is the opener column, and COMMENT-START-POS is
+the comment opener position.
+The indentation is read from the first non-blank body line, the closer
+line when the body lines are all blank, the opener line for a comment
+on one line.
+NOTE: the opener line's indentation is only its leading blank-space,
+padded with spaces to OPENER-COL.  With code before the opener, a line
+indented with tabs isn't laid out that way, so its prefix wouldn't match.
+So any later line is preferred to it."
   (declare (important-return-value t))
   (concat
    (fancy-fill-paragraph--extract-body-indent
     (cond
-     ((and body
-           (save-excursion
-             (goto-char (car body))
-             (skip-chars-forward " \t" (pos-eol))
-             (not (eolp))))
-      (car body))
+     ;; A body implies a closer line, checking both is paranoid.
+     ((and body closer-bol)
+      (save-excursion
+        (goto-char (car body))
+        ;; Blank lines hold no indentation to read.
+        (while (and (< (point) closer-bol) (looking-at-p "[ \t]*$"))
+          (forward-line 1))
+        (point)))
      (t
       beg))
     opener-col)
@@ -2427,7 +2435,7 @@ continuation prefix (` * text */') or without it (`   text */')."
              (closer-line-body (and (null inner-body) closer-bol (cons closer-bol end)))
              (cont-prefix
               (fancy-fill-paragraph--block-comment-continuation-prefix
-               beg (or inner-body closer-line-body) opener-col comment-start-pos))
+               beg (or inner-body closer-line-body) closer-bol opener-col comment-start-pos))
              (closer-end
               (save-excursion
                 (goto-char comment-start-pos)

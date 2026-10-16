@@ -6976,6 +6976,83 @@ or no wider than it, is kept as before."
               (fill-column (nth 1 case)))
           (should-fill-same-from-every-position (nth 2 case) 0 (nth 3 case)))))))
 
+(ert-deftest fill-syntax-bounds-block-comment-prefix-past-blank-lines ()
+  "A comment whose body starts blank reads its prefix from the next line.
+It was read from the opener line, whose indentation is its leading
+blank-space padded with spaces.  So with tabs after code, the body's
+lines didn't match it and its paragraphs were filled as prose, losing
+their tabs and the ` * ' of wrapped lines.  The opener's paragraph
+wrapped with a prefix unlike the comment's other lines.
+Comments indented with spaces fill as before, as do comments whose
+first body line isn't blank.
+Each case is filled from the lines listed."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  ;; Tabs after code (Linux kernel style for e.g.), the opener's paragraph.
+                  (list
+                   30
+                   '(0)
+                   "\tfoo();\t/* aaa bbb ccc ddd eee\n\n\t\t * fff */\n"
+                   "\tfoo();\t/* aaa bbb ccc\n\t\t * ddd eee\n\n\t\t * fff */\n")
+                  (list
+                   30
+                   '(0)
+                   "\tfoo();\t/* aaa bbb ccc ddd eee\n\n\n\t\t * fff */\n"
+                   "\tfoo();\t/* aaa bbb ccc\n\t\t * ddd eee\n\n\n\t\t * fff */\n")
+                  ;; Only the closer after the blank line.
+                  (list
+                   30
+                   '(0)
+                   "\tfoo();\t/* aaa bbb ccc ddd eee\n\n\t\t */\n"
+                   "\tfoo();\t/* aaa bbb ccc\n\t\t * ddd eee\n\n\t\t */\n")
+                  ;; A body paragraph, the closer line kept or joined.
+                  (list
+                   30 '(2) "\tfoo();\t/* aaa\n\n\t\t * bbb ccc ddd eee fff ggg hhh\n\t\t */\n"
+                   (concat
+                    "\tfoo();\t/* aaa\n\n"
+                    "\t\t * bbb ccc ddd\n\t\t * eee fff ggg\n\t\t * hhh\n\t\t */\n"))
+                  (list
+                   30
+                   '(2)
+                   "\tfoo();\t/* aaa\n\n\t\t * bbb ccc ddd eee fff ggg hhh */\n"
+                   "\tfoo();\t/* aaa\n\n\t\t * bbb ccc ddd\n\t\t * eee fff ggg\n\t\t * hhh */\n")
+                  ;; Preservation: indented with spaces.
+                  (list
+                   20
+                   '(0)
+                   "/* aaa bbb ccc ddd eee fff\n\n * ggg\n */\n"
+                   "/* aaa bbb ccc ddd\n * eee fff\n\n * ggg\n */\n")
+                  (list
+                   20
+                   '(0)
+                   "    /* aaa bbb ccc ddd eee\n\n     * ggg\n     */\n"
+                   "    /* aaa bbb ccc\n     * ddd eee\n\n     * ggg\n     */\n")
+                  (list
+                   20
+                   '(2)
+                   "    /* aaa\n\n     * bbb ccc ddd eee\n     */\n"
+                   "    /* aaa\n\n     * bbb ccc ddd\n     * eee\n     */\n")
+                  (list
+                   20
+                   '(2)
+                   "    /* aaa\n\n       bbb ccc ddd eee\n     */\n"
+                   "    /* aaa\n\n       bbb ccc ddd\n       eee\n     */\n")
+                  ;; Preservation: the first body line isn't blank.
+                  (list
+                   30
+                   '(0)
+                   "\tfoo();\t/* aaa bbb ccc ddd eee\n\t\t * fff\n\n\t\t * ggg */\n"
+                   "\tfoo();\t/* aaa bbb ccc\n\t\t * ddd eee fff\n\n\t\t * ggg */\n")))
+          ;; A selection leaves a comment after code alone, so only the cursor.
+          (let ((fill-column (nth 0 case)))
+            (dolist (line-index (nth 1 case))
+              (should-fill-same-from-every-position (nth 2 case) line-index (nth 3 case)))))))))
+
 (ert-deftest fill-syntax-bounds-one-line-block-comment-prefix-width ()
   "A comment on one line wraps as wide as its continuation lines allow.
 The prefix width was measured on the opener line, counting the code
