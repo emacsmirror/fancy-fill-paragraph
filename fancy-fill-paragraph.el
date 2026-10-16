@@ -2291,7 +2291,8 @@ COMMENT-START-POS is the buffer position of the comment opener.
 When SEL-BEG and SEL-END are non-nil, fill only body paragraphs
 overlapping that selection.  Otherwise fill the paragraph at point.
 When lines lie between the opener and closer lines, fills body
-paragraphs, text on the opener line joining the first.  Otherwise the
+paragraphs, text on the opener line joining the first, as is the closer
+line's text when the opener line holds only the opener.  Otherwise the
 comment is inline and fills as one paragraph, the opener line keeping
 its opener as prefix and later lines taking the continuation prefix.
 Either way a closer alone on its line (` */'), or a closer line no
@@ -2310,17 +2311,29 @@ continuation prefix (` * text */') or without it (`   text */')."
                 (current-column)))
              (opener-info (fancy-fill-paragraph--block-comment-opener-info comment-start-pos))
              (inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
+             (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
+             ;; NOTE: on two lines, an opener line holding only the opener
+             ;; leaves the closer line's text as the body, filled as the
+             ;; body of a longer comment of the same shape.  Filled inline,
+             ;; the opener line's code was taken for the first line's text,
+             ;; the closer line's text was joined onto the opener.
+             (closer-line-body
+              (and (null inner-body)
+                   closer-bol
+                   (null (plist-get opener-info :text))
+                   (cons closer-bol end)))
              (cont-prefix
               (fancy-fill-paragraph--block-comment-continuation-prefix
-               beg inner-body opener-col comment-start-pos))
+               beg (or inner-body closer-line-body) opener-col comment-start-pos))
              (closer-end
               (save-excursion
                 (goto-char comment-start-pos)
                 (forward-comment 1)
                 (point)))
-             (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
              (closer-kind
               (fancy-fill-paragraph--closer-line-kind closer-bol closer-end cont-prefix))
+             ;; Only a closer line joining the body has text to fill.
+             (inner-body (or inner-body (and (eq closer-kind 'joins) closer-line-body)))
              ;; A comment that never closes has no closer to hold out.
              (closer
               (fancy-fill-paragraph--closer-word

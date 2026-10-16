@@ -878,6 +878,87 @@ opener, which is also the width the fill is measured against."
       (let ((inhibit-message t))
         (should-fill-same-from-every-position text-initial 0 text-expected)))))
 
+(ert-deftest fill-syntax-bounds-code-before-block-comment-bare-opener ()
+  "A two-line comment after code, its opener line holding no text, fills its text.
+Filling it inserted a stray ` *' line above the code and joined the text
+onto the opener.  It fills as a longer comment of the same shape does.
+With text after the opener, the comment still fills."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list
+                   20
+                   "x = 1; /*\n   aaa bbb ccc ddd eee fff ggg hhh */\n"
+                   "x = 1; /*\n   aaa bbb ccc ddd\n   eee fff ggg hhh\n   */\n")
+                  (list
+                   70
+                   "x = 1; /*\n   aaa bbb ccc ddd eee fff ggg hhh */\n"
+                   "x = 1; /*\n   aaa bbb ccc ddd eee fff ggg hhh */\n")
+                  ;; The longer layout, for contrast.
+                  (list
+                   20
+                   "x = 1; /*\n   aaa bbb ccc ddd eee\n   fff ggg hhh */\n"
+                   "x = 1; /*\n   aaa bbb ccc ddd\n   eee fff ggg hhh\n   */\n")))
+          ;; A selection leaves a comment after code alone, so only the cursor.
+          (let ((fill-column (nth 0 case)))
+            (dolist (line-index (list 0 1))
+              (should-fill-same-from-every-position (nth 1 case) line-index (nth 2 case)))))
+        (let ((fill-column 24))
+          (dolist (line-index (list 0 1))
+            (should-fill-same-from-every-position
+             "x = 1; /* aaa\n   bbb ccc ddd eee fff ggg hhh */\n" line-index
+             (concat
+              "x = 1; /* aaa bbb ccc\n" "        * ddd eee fff\n" "        * ggg hhh */\n"))))))))
+
+(ert-deftest fill-syntax-bounds-two-line-block-comment-bare-opener-fills ()
+  "A two-line comment, its opener line holding no text, fills its text.
+It was left unfilled, the closer line's text not joining the opener.
+It fills as a longer comment of the same shape does, from the cursor or
+a selection, as does a comment that never closes.  A closer line
+without text to fill, or text that already fits, is left as it is."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 20))
+    (dolist (case
+             (list
+              (list
+               #'c-mode
+               "/*\n * aaa bbb ccc ddd eee fff ggg hhh */\n"
+               "/*\n * aaa bbb ccc ddd\n * eee fff ggg hhh\n */\n")
+              ;; The longer layout, for contrast.
+              (list
+               #'c-mode
+               "/*\n * aaa bbb ccc ddd eee\n * fff ggg hhh */\n"
+               "/*\n * aaa bbb ccc ddd\n * eee fff ggg hhh\n */\n")
+              (list
+               #'c-mode
+               "  /*\n     aaa bbb ccc ddd eee fff ggg hhh */\n"
+               "  /*\n     aaa bbb ccc ddd\n     eee fff ggg hhh\n     */\n")
+              (list
+               #'html-mode
+               "<!--\naaa bbb ccc ddd eee fff ggg hhh -->\n"
+               "<!--\naaa bbb ccc ddd eee\nfff ggg hhh -->\n")
+              ;; Preservation: nothing to fill, or already filled.
+              (list #'c-mode "/*\n */\n" "/*\n */\n")
+              (list #'c-mode "/*\n * */\n" "/*\n * */\n")
+              (list #'c-mode "/*\n x */\n" "/*\n x */\n")
+              (list #'c-mode "/*\n * aaa bbb */\n" "/*\n * aaa bbb */\n")
+              ;; A comment that never closes.
+              (list
+               #'c-mode
+               "/*\n * aaa bbb ccc ddd eee fff ggg hhh"
+               "/*\n * aaa bbb ccc ddd\n * eee fff ggg hhh")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (dolist (line-index (list 0 1))
+            (should-fill-same-from-every-position (nth 1 case) line-index (nth 2 case)))
+          (should-fill-selection (nth 1 case) 0 (nth 2 case)))))))
+
 (ert-deftest fill-syntax-bounds-code-before-block-comment-fill-twice-keeps-text ()
   "Filling twice must not delete comment text or duplicate the code.
 Merging the code into the comment on the first fill is a separate
@@ -6062,8 +6143,8 @@ first line early so the closer was all that didn't fit."
 (ert-deftest fill-syntax-bounds-block-comment-unprefixed-body-tab-indent-kept ()
   "A comment body without the prefix keeps its indentation as written.
 It was filled as prose, its indentation rebuilt from spaces, so a tab
-and three spaces became four, moving the text from column 11 to 4.
-Each result also fills unchanged."
+and three spaces became four, moving the text from column 11 to 4.  On
+two lines the comment wasn't filled.  Each result also fills unchanged."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (sentence-end-double-space nil)
         (fill-column 38))
@@ -6074,7 +6155,10 @@ Each result also fills unchanged."
                  (list
                   (list "\t/**\n\t   d hhh ff. i.e. */\n" "\t/**\n\t   d hhh ff. i.e. */\n")
                   (list
-                   "\t/**\n\t   aaa bbb\n\t   ccc ddd */\n" "\t/**\n\t   aaa bbb ccc ddd */\n")))
+                   "\t/**\n\t   aaa bbb\n\t   ccc ddd */\n" "\t/**\n\t   aaa bbb ccc ddd */\n")
+                  (list
+                   "\t/**\n\t   aaa bbb ccc ddd eee fff ggg hhh iii */\n"
+                   "\t/**\n\t   aaa bbb ccc ddd eee fff ggg\n\t   hhh iii */\n")))
           (should-fill-same-from-every-position (nth 0 case) 1 (nth 1 case))
           (should-fill-selection (nth 0 case) 0 (nth 1 case)))))))
 
