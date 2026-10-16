@@ -6390,6 +6390,160 @@ style or prefixed."
             (fill-column 70))
         (should-fill-same-from-every-position "(* aaa bbb\n *)\n" 0 "(* aaa bbb\n *)\n")))))
 
+(ert-deftest fill-syntax-bounds-two-line-block-comment-prefix-from-closer-line ()
+  "A two-line comment reads its continuation prefix from the closer line.
+It was read from the opener line, whose indentation is its leading
+blank-space padded with spaces.  So a closer line indented otherwise,
+with tabs after code for e.g., didn't match and its ` *' was joined as
+text.  Measured on the opener line, tabs or wide characters in the code
+gave the prefix the wrong width, cutting into the closer line's text.
+Each case is followed by its longer form for contrast."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  ;; Tabs after code (Linux kernel style for e.g.).
+                  (list 70 "\tfoo();\t/* aaa bbb\n\t\t * ccc */\n" "\tfoo();\t/* aaa bbb ccc */\n")
+                  (list
+                   70
+                   "\tfoo();\t/* aaa bbb\n\t\t * ccc\n\t\t * ddd */\n"
+                   "\tfoo();\t/* aaa bbb ccc ddd */\n")
+                  (list
+                   36
+                   "\tfoo();\t/* aaa bbb ccc ddd eee\n\t\t * fff */\n"
+                   "\tfoo();\t/* aaa bbb ccc ddd\n\t\t * eee fff */\n")
+                  (list
+                   36
+                   "\tfoo();\t/* aaa bbb ccc ddd eee\n\t\t * fff\n\t\t * ggg */\n"
+                   "\tfoo();\t/* aaa bbb ccc ddd\n\t\t * eee fff ggg */\n")
+                  ;; A tab before the opener, spaces before the closer line's prefix.
+                  (list 70 "\t/* aaa bbb\n         * ccc */\n" "\t/* aaa bbb ccc */\n")
+                  (list
+                   70
+                   "\t/* aaa bbb\n         * ccc\n         * ddd */\n"
+                   "\t/* aaa bbb ccc ddd */\n")
+                  ;; Wide characters or a tab in the code before the opener.
+                  (list
+                   70
+                   "s = \"\u65e5\u672c\u8a9e\"; /* aaa bbb\n               * ccc */\n"
+                   "s = \"\u65e5\u672c\u8a9e\"; /* aaa bbb ccc */\n")
+                  (list
+                   70
+                   (concat
+                    "s = \"\u65e5\u672c\u8a9e\"; /* aaa bbb\n"
+                    "               * ccc\n"
+                    "               * ddd */\n")
+                   "s = \"\u65e5\u672c\u8a9e\"; /* aaa bbb ccc ddd */\n")
+                  (list 70 "foo();\t/* aaa bbb\n         * ccc */\n" "foo();\t/* aaa bbb ccc */\n")
+                  (list
+                   70
+                   "foo();\t/* aaa bbb\n         * ccc\n         * ddd */\n"
+                   "foo();\t/* aaa bbb ccc ddd */\n")))
+          ;; A selection leaves a comment after code alone, so only the cursor.
+          (let ((fill-column (nth 0 case)))
+            (dolist (line-index (list 0 1))
+              (should-fill-same-from-every-position (nth 1 case) line-index (nth 2 case)))))))))
+
+(ert-deftest fill-syntax-bounds-two-line-block-comment-prefix-spaces-unchanged ()
+  "A comment indented with spaces fills as before its prefix was measured alone.
+Measured over the opener line, or read from it, spaces gave the same
+prefix as the closer line's.  A closer line without the prefix, alone
+or no wider than it, is kept as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'c-mode
+               70
+               "  x = 1; /* aaa bbb\n          * ccc */\n"
+               "  x = 1; /* aaa bbb ccc */\n")
+              (list
+               #'c-mode
+               30
+               "  x = 1; /* aaa bbb ccc ddd eee fff\n          * ggg */\n"
+               "  x = 1; /* aaa bbb ccc ddd\n          * eee fff ggg */\n")
+              (list
+               #'c-mode
+               30
+               "  x = 1; /* aaa bbb ccc ddd eee fff ggg hhh */\n"
+               "  x = 1; /* aaa bbb ccc ddd\n          * eee fff ggg hhh */\n")
+              (list #'c-mode 70 "x = 1; /* aaa\n   bbb */\n" "x = 1; /* aaa\n   bbb */\n")
+              (list
+               #'c-mode
+               20
+               "/* aaa bbb ccc ddd eee fff ggg\n */\n"
+               "/* aaa bbb ccc ddd\n * eee fff ggg\n */\n")
+              (list
+               #'c-mode
+               20
+               "/* aaa bbb ccc ddd eee fff ggg\n x */\n"
+               "/* aaa bbb ccc ddd\n * eee fff ggg x */\n")
+              (list
+               #'js-mode
+               24
+               "    /** aaa bbb ccc ddd eee fff\n     * ggg */\n"
+               "    /** aaa bbb ccc ddd\n     * eee fff ggg */\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column (nth 1 case)))
+          (should-fill-same-from-every-position (nth 2 case) 0 (nth 3 case)))))))
+
+(ert-deftest fill-syntax-bounds-one-line-block-comment-prefix-width ()
+  "A comment on one line wraps as wide as its continuation lines allow.
+The prefix width was measured on the opener line, counting the code
+before the opener.  So wide characters or tabs there wrapped the text
+short, filling it again moved it.  Each result also fills unchanged."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  ;; Wide characters in the code before the opener.
+                  (list
+                   40
+                   (concat
+                    "s = \"\u65e5\u672c\u8a9e\u65e5\u672c\u8a9e\";"
+                    " /* aa bb cc dd ee ff gg hh ii jj */\n")
+                   (concat
+                    "s = \"\u65e5\u672c\u8a9e\u65e5\u672c\u8a9e\"; /* aa bb cc dd ee ff\n"
+                    "                     * gg hh ii jj */\n"))
+                  ;; Tabs in the code before the opener.
+                  (list
+                   37
+                   "\tfoo();\t/* aaa bbb ccc ddd eee fff ggg hhh */\n"
+                   "\tfoo();\t/* aaa bbb ccc ddd\n\t         * eee fff ggg hhh */\n")
+                  ;; Spaces before a tab indenting the opener line, the prefix keeps both.
+                  (list
+                   36
+                   "  \tfoo(); /* aaa bbb ccc ddd eee fff ggg hhh */\n"
+                   "  \tfoo(); /* aaa bbb ccc ddd\n  \t        * eee fff ggg hhh */\n")))
+          ;; A selection leaves a comment after code alone, so only the cursor.
+          (let ((fill-column (nth 0 case)))
+            (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case))
+            (should-fill-same-from-every-position (nth 2 case) 0 (nth 2 case))))))))
+
+(ert-deftest fill-syntax-bounds-prefix-width-tab-width-zero ()
+  "A prefix holding a tab is measured with a `tab-width' of zero as eight.
+Emacs lays out a tab with a `tab-width' of zero as eight columns."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t)
+            (fill-column 34))
+        (setq tab-width 0)
+        (should-fill-same-from-every-position
+         "\tfoo();\t/* aaa bbb ccc ddd eee fff ggg hhh iii jjj\n\t\t * kkk */\n"
+         0
+         "\tfoo();\t/* aaa bbb ccc ddd\n\t\t * eee fff ggg hhh\n\t\t * iii jjj kkk */\n")))))
+
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-bare-separator-width ()
   "A bare ` *' separator line does not widen the paragraph above it.
 The prefix width was measured on that line, one column short of ` * '.

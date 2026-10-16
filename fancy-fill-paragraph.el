@@ -1660,8 +1660,9 @@ COMMENT-START-POS is the buffer position of the comment opener."
 (defun fancy-fill-paragraph--block-comment-continuation-prefix
     (beg body opener-col comment-start-pos)
   "Return the full continuation prefix for a block comment.
-BEG is the region start, BODY is the body bounds or nil, OPENER-COL is
-the opener column, and COMMENT-START-POS is the comment opener position.
+BEG is the region start, BODY is the body bounds, the closer line's for
+a comment on two lines, or nil on one line.  OPENER-COL is the opener
+column, and COMMENT-START-POS is the comment opener position.
 The indentation is read from the first body line, or the opener line
 when the body starts with a blank line, which holds none to read."
   (declare (important-return-value t))
@@ -2171,10 +2172,13 @@ the continuation prefix (e.g. ` */' beside ` * '), so it is kept as it
 is rather than filled."
   (declare (important-return-value t))
   (let ((closer-bol (fancy-fill-paragraph--closer-line-bol beg end)))
+    ;; Measured in columns, as PREFIX-COL is, counted in characters a line
+    ;; indented with tabs was taken to be narrower.
     (and closer-bol
          (save-excursion
            (goto-char closer-bol)
-           (<= (- (pos-eol) closer-bol) prefix-col))
+           (end-of-line)
+           (<= (current-column) prefix-col))
          closer-bol)))
 
 (defun fancy-fill-paragraph--closer-line-kind (closer-bol closer-end cont-prefix)
@@ -2256,7 +2260,11 @@ of its own, held out of the fill, see
             (or (null closer-end)
                 (and (<= closer-end end) (< (fancy-fill-paragraph--last-bol end) closer-end))))
     (error "Expected comment at %d to close on line ending at %d" comment-start-pos end))
-  (let* ((prefix-col (fancy-fill-paragraph--prefix-column-width beg cont-prefix))
+  (let* ( ;; NOTE: the prefix starts its line, as filled lines do, so it's
+         ;; measured alone.  Measured over the opener line, tabs or wide
+         ;; characters in the code before the opener gave it another width,
+         ;; cutting into the text of the lines after it.
+         (prefix-col (fancy-fill-paragraph--string-column-width cont-prefix))
          (opener-text
           (save-excursion
             (goto-char beg)
@@ -2312,16 +2320,13 @@ continuation prefix (` * text */') or without it (`   text */')."
              (opener-info (fancy-fill-paragraph--block-comment-opener-info comment-start-pos))
              (inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
              (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
-             ;; NOTE: on two lines, an opener line holding only the opener
-             ;; leaves the closer line's text as the body, filled as the
-             ;; body of a longer comment of the same shape.  Filled inline,
-             ;; the opener line's code was taken for the first line's text,
-             ;; the closer line's text was joined onto the opener.
-             (closer-line-body
-              (and (null inner-body)
-                   closer-bol
-                   (null (plist-get opener-info :text))
-                   (cons closer-bol end)))
+             ;; NOTE: on two lines, the prefix is read from the closer line,
+             ;; as a longer comment reads it from its first body line.  The
+             ;; opener line's indentation is only its leading blank-space,
+             ;; padded with spaces to the opener, so a closer line indented
+             ;; with tabs after code (Linux kernel style for e.g.) didn't
+             ;; match it, its ` *' joined as text.
+             (closer-line-body (and (null inner-body) closer-bol (cons closer-bol end)))
              (cont-prefix
               (fancy-fill-paragraph--block-comment-continuation-prefix
                beg (or inner-body closer-line-body) opener-col comment-start-pos))
@@ -2332,8 +2337,17 @@ continuation prefix (` * text */') or without it (`   text */')."
                 (point)))
              (closer-kind
               (fancy-fill-paragraph--closer-line-kind closer-bol closer-end cont-prefix))
+             ;; NOTE: on two lines, an opener line holding only the opener
+             ;; leaves the closer line's text as the body, filled as the
+             ;; body of a longer comment of the same shape.  Filled inline,
+             ;; the opener line's code was taken for the first line's text,
+             ;; the closer line's text was joined onto the opener.
              ;; Only a closer line joining the body has text to fill.
-             (inner-body (or inner-body (and (eq closer-kind 'joins) closer-line-body)))
+             (inner-body
+              (or inner-body
+                  (and (null (plist-get opener-info :text))
+                       (eq closer-kind 'joins)
+                       closer-line-body)))
              ;; A comment that never closes has no closer to hold out.
              (closer
               (fancy-fill-paragraph--closer-word
