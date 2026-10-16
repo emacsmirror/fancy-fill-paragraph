@@ -2551,13 +2551,26 @@ one line is only filled when its delimiter is repeated, otherwise it's
 left as it is, as is a paragraph continued with an escaped newline.
 Without a line between the opener and closer lines, code before the
 opener is kept on the first line, later lines continuing at the second
-line's indentation."
+line's indentation, an opener line holding only the opener leaving the
+closer line's text as the body."
   (let* ((inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
          (opener-info (fancy-fill-paragraph--string-opener-info opener-pos))
          (closer-end (fancy-fill-paragraph--string-end opener-pos))
          (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
          (closer-kind (fancy-fill-paragraph--closer-line-kind closer-bol closer-end nil))
          (closer (fancy-fill-paragraph--closer-word closer-kind closer-end beg))
+         ;; NOTE: on two lines, an opener line holding only the opener
+         ;; leaves the closer line's text as the body, filled as the body
+         ;; of a longer string of the same shape, as for a block comment.
+         ;; Filled as prose, the closer line's text was left as it was or
+         ;; joined onto the opener, the code before the opener broken.
+         ;; Only a closer line joining the body has text to fill.
+         (inner-body
+          (or inner-body
+              (and (null (plist-get opener-info :text))
+                   (eq closer-kind 'joins)
+                   closer-bol
+                   (cons closer-bol end))))
          (cont-prefix
           (when (and inner-body (plist-get opener-info :text))
             (let ((dp-match

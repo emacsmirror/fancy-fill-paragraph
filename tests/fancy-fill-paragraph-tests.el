@@ -5522,13 +5522,15 @@ own marker."
   "A comment or string on two lines fills as a longer one of the same shape.
 Most cases are followed by their longer form for contrast, the others
 are preservation cases.  Code after the closer left a two-line region
-unfilled, a longer one fills its body.  A string's closer alone on its
-line took the prose fill, continuing at the opener line's indentation,
-after code it broke the line before the opener.  It now continues at
-the closer's indentation, as with a line between them.
+unfilled, a longer one fills its body.  An opener line holding only the
+opener left the closer line's text unfilled.  A string's closer alone on
+its line took the prose fill, continuing at the opener line's
+indentation, after code it broke the line before the opener.  It now
+continues at the closer's indentation, as with a line between them.
 Each case is filled from the lines listed, the cursor on a closer line
 followed by code being on the code, below an empty line it's past the
-paragraph."
+paragraph.  Where noted, also by a selection,
+which leaves strings and comments sharing a line with code alone."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 20)
         (sentence-end-double-space nil))
@@ -5566,6 +5568,38 @@ paragraph."
                nil
                "/* aaa bbb ccc ddd eee fff ggg */ int x;\n"
                "/* aaa bbb ccc ddd eee fff ggg */ int x;\n")
+              ;; An opener line holding only the opener.
+              (list
+               #'c-mode
+               '(0 1)
+               t
+               "/*\n   aaa bbb ccc ddd eee fff ggg hhh */\n"
+               "/*\n   aaa bbb ccc ddd\n   eee fff ggg hhh\n   */\n")
+              (list
+               #'c-mode
+               '(0 1 2)
+               t
+               "/*\n   aaa bbb ccc ddd\n   eee fff ggg hhh */\n"
+               "/*\n   aaa bbb ccc ddd\n   eee fff ggg hhh\n   */\n")
+              (list
+               #'python-mode
+               '(1 2)
+               nil
+               "def f():\n    \"\"\"\n    aaa bbb ccc ddd eee fff ggg hhh\"\"\"\n"
+               "def f():\n    \"\"\"\n    aaa bbb ccc ddd\n    eee fff ggg\n    hhh\"\"\"\n")
+              (list
+               #'python-mode
+               '(1 2 3)
+               nil
+               "def f():\n    \"\"\"\n    aaa bbb\n    ccc ddd eee fff ggg hhh\"\"\"\n"
+               "def f():\n    \"\"\"\n    aaa bbb ccc ddd\n    eee fff ggg\n    hhh\"\"\"\n")
+              ;; Preservation: after code the string filled before, the same result.
+              (list
+               #'python-mode
+               '(0 1)
+               nil
+               "x = 1 + \"\"\"\n    aaa bbb ccc ddd eee fff ggg hhh\"\"\"\n"
+               "x = 1 + \"\"\"\n    aaa bbb ccc ddd\n    eee fff ggg\n    hhh\"\"\"\n")
               ;; A string's closer alone.
               (list
                #'python-mode
@@ -5610,6 +5644,49 @@ paragraph."
             (should-fill-same-from-every-position (nth 3 case) line-index (nth 4 case)))
           (when (nth 2 case)
             (should-fill-selection (nth 3 case) 0 (nth 4 case))))))))
+
+(ert-deftest fill-syntax-bounds-two-line-string-bare-opener-line-kept ()
+  "A string's opener line holding only the opener is kept as it is.
+The closer line's text took the prose fill, which joined it onto the
+opener, and at a narrow width broke the code before the opener, an
+error in Python."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               26
+               "x = \"\"\"\naaa bbb ccc ddd eee fff ggg hhh\"\"\"\n"
+               "x = \"\"\"\naaa bbb ccc ddd eee fff\nggg hhh\"\"\"\n")
+              (list
+               10 "x = 1 + \"\"\"\n    aaa bbb ccc ddd eee fff ggg hhh\"\"\"\n"
+               (concat
+                "x = 1 + \"\"\"\n    aaa\n    bbb\n    ccc\n    ddd\n"
+                "    eee\n    fff\n    ggg\n    hhh\"\"\"\n"))))
+      (with-temp-buffer
+        (python-mode)
+        (let ((fill-column (nth 0 case))
+              (inhibit-message t))
+          (dolist (line-index '(0 1))
+            (should-fill-same-from-every-position (nth 1 case) line-index (nth 2 case))))))))
+
+(ert-deftest fill-syntax-bounds-two-line-string-bare-opener-unchanged ()
+  "A string's opener line holding only the opener, with nothing to fill.
+A closer alone on its line leaves no text, text that fits is left as it
+is, as is an opener line ending with an escaped newline."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list '(0 1 2) "def f():\n    \"\"\"\n    \"\"\"\n")
+              (list '(0 1 2) "def f():\n    \"\"\"\n    aaa\"\"\"\n")
+              (list '(0 1) "x = \"\"\"\\\n    aaa bbb ccc ddd eee fff ggg hhh\"\"\"\n")))
+      (with-temp-buffer
+        (python-mode)
+        (let ((inhibit-message t))
+          (dolist (line-index (nth 0 case))
+            (should-fill-same-from-every-position (nth 1 case) line-index (nth 1 case))))))))
 
 (ert-deftest fill-syntax-bounds-two-line-region-code-after-closer-unchanged ()
   "Code after a closer leaves a region with nothing to fill unchanged.
