@@ -361,8 +361,8 @@ already sits on the line, so it probes the same syntax region."
 Probes `syntax-ppss' at POS and, when that yields nothing, at
 POS+1 so that a cursor directly on a comment-start character
 \(e.g. `#') or string delimiter is still detected.
-The quotes ending a triple-quoted string belong to that string, see
-`fancy-fill-paragraph--string-end'."
+The quotes ending a repeated delimiter belong to its string, see
+`fancy-fill-paragraph--string-delimiter-length'."
   (declare (important-return-value t))
   (save-excursion
     (let ((start
@@ -373,7 +373,7 @@ The quotes ending a triple-quoted string belong to that string, see
                    (and beg (<= beg pos) beg)))
                 (t
                  nil)))))
-      (or (and start (fancy-fill-paragraph--string-fence-closer-owner start)) start))))
+      (or (and start (fancy-fill-paragraph--string-closer-run-owner start)) start))))
 
 (defsubst fancy-fill-paragraph--syntax-string-delimiter-p (syn-descriptor)
   "Return non-nil if SYN-DESCRIPTOR is a string delimiter.
@@ -390,11 +390,11 @@ String quote and string fence, as for
 `fancy-fill-paragraph--syntax-string-delimiter-p', so a backtick counts
 as much as a double quote.")
 
-(defsubst fancy-fill-paragraph--syntax-string-fence-p (syn-descriptor)
-  "Return non-nil if SYN-DESCRIPTOR is a string fence (class 15).
-SYN-DESCRIPTOR may be nil, in which case nil is returned."
+(defsubst fancy-fill-paragraph--char-skip-set (char)
+  "Return a `skip-chars-forward' set matching CHAR alone.
+CHAR is quoted, a `^' would negate the set and a `-' make a range."
   (declare (important-return-value t))
-  (eq 15 (syntax-class syn-descriptor)))
+  (concat "\\" (string char)))
 
 (defun fancy-fill-paragraph--sexp-end (pos)
   "Return the end of the sexp at POS, or nil when it never closes."
@@ -404,52 +404,93 @@ SYN-DESCRIPTOR may be nil, in which case nil is returned."
     (scan-error
      nil)))
 
-(defun fancy-fill-paragraph--empty-string-at-p (pos)
-  "Return non-nil when POS opens an empty string, two delimiters in a row."
-  (declare (important-return-value t))
-  (and (fancy-fill-paragraph--syntax-string-delimiter-p (syntax-after pos))
-       (eq (+ pos 2) (fancy-fill-paragraph--sexp-end pos))))
-
 (defun fancy-fill-paragraph--string-end (opener-pos)
   "Return the position after the closer of the string opening at OPENER-POS.
-Returns nil when the string never closes.
-
-NOTE: `python-mode' gives string fence syntax to the first quote of a
-closing triple quote, ending the string there.  The two quotes after it
-then read as an empty string of their own, taken for a separate region
-to fill or for code following the closer.  Include them in the closer."
+Returns nil when the string never closes.  The closer is as long as the
+delimiter, see `fancy-fill-paragraph--string-delimiter-length'."
   (declare (important-return-value t))
   (let ((end (fancy-fill-paragraph--sexp-end opener-pos)))
+    (and end (+ (1- end) (fancy-fill-paragraph--string-delimiter-length opener-pos end)))))
+
+(defun fancy-fill-paragraph--string-delimiter-length (opener-pos end)
+  "Return the length of the delimiter of the string opening at OPENER-POS.
+END is the end of the string's sexp, nil when it never closes.  The
+delimiter is the run of its character ending at OPENER-POS, as long as
+the run starting at the closing delimiter, the shorter of the two when
+they differ.  A string that never closes, or closes with another
+character, has a delimiter of one.
+NOTE: syntax finds where a string is, the text how long its delimiter
+is.  A mode may give string syntax to one character of a longer
+delimiter, the rest reading as empty strings of their own
+\(`python-mode' gives it to one quote of each triple quote for e.g.).
+The shorter run is taken so an empty string glued to a string opened
+with one quote isn't part of its delimiter (shell `\"\"\"aaa\"' for e.g.).
+A limitation: equal runs are taken for a repeated delimiter in any
+mode, although shell `\"\"\"aaa\"\"\"' is three strings, so its line may
+wrap.  Telling them apart takes the language's rules, so accept it."
+  (declare (important-return-value t))
+  (let ((chars (fancy-fill-paragraph--char-skip-set (char-after opener-pos))))
     (cond
-     ((and end
-           (fancy-fill-paragraph--syntax-string-fence-p (syntax-after (1- end)))
-           (fancy-fill-paragraph--empty-string-at-p end))
-      (+ end 2))
+     ((and end (eq (char-before end) (char-after opener-pos)))
+      (save-excursion
+        (min (progn
+               (goto-char (1+ opener-pos))
+               (- (point)
+                  (progn
+                    (skip-chars-backward chars (pos-bol))
+                    (point))))
+             (progn
+               (goto-char (1- end))
+               (skip-chars-forward chars (pos-eol))
+               (- (point) (1- end))))))
      (t
-      end))))
+      1))))
 
-(defun fancy-fill-paragraph--string-fence-closer-owner (pos)
-  "Return the start of the string whose closer holds the empty string at POS.
-Returns nil when POS does not open the two quotes after the fence
-closing a triple-quoted string, see `fancy-fill-paragraph--string-end'."
+(defun fancy-fill-paragraph--string-closer-run-owner (pos)
+  "Return the start of the string whose closer holds the string at POS.
+Returns nil when POS does not follow the start of a closing delimiter
+in the same run, see `fancy-fill-paragraph--string-delimiter-length'.
+The run before POS is read from its start, the first string open before
+one of its characters and closing past POS owning it.  An empty string's
+opener and closer are one run (`\"\"\"\"\"\"' for e.g.), so the run
+may start before the string."
   (declare (important-return-value t))
-  (let* ((ppss (and (> pos (point-min)) (syntax-ppss (1- pos))))
-         ;; Only a string owns them.  A comment ending just before POS (a
-         ;; shebang line above a module doc-string for e.g.) is skipped by
-         ;; the scan for its end, which then ends past the quotes too.
-         (owner (and (nth 3 ppss) (nth 8 ppss))))
-    (and owner (eq (+ pos 2) (fancy-fill-paragraph--string-end owner)) owner)))
+  (let ((q
+         (save-excursion
+           (goto-char pos)
+           (skip-chars-backward (fancy-fill-paragraph--char-skip-set (char-after pos)) (pos-bol))
+           (point)))
+        (owner nil))
+    (while (and (null owner) (< q pos))
+      (let* ((ppss (save-excursion (syntax-ppss q)))
+             ;; Only a string owns them.  A comment ending just before them (a
+             ;; shebang line above a module doc-string for e.g.) is skipped by
+             ;; the scan for its end, which then ends past the quotes too.
+             (start (and (nth 3 ppss) (nth 8 ppss)))
+             (start-end (and start (fancy-fill-paragraph--string-end start))))
+        (when (and start-end (< pos start-end))
+          (setq owner start)))
+      (setq q (1+ q)))
+    owner))
 
-(defun fancy-fill-paragraph--string-fence-opener-start (pos)
-  "Return the start of the string whose opener holds the empty string at POS.
-Returns nil when POS does not open the two quotes before the fence
-opening a triple-quoted string.  Like the closer, `python-mode' gives
-fence syntax to one quote of the opener, its last, so the two before
-it read as an empty string of their own."
+(defun fancy-fill-paragraph--string-opener-run-start (pos)
+  "Return the start of the string whose opener holds the string at POS.
+Returns nil when POS does not open a run whose last character starts a
+string with a delimiter reaching back to POS, see
+`fancy-fill-paragraph--string-delimiter-length'."
   (declare (important-return-value t))
-  (and (fancy-fill-paragraph--syntax-string-fence-p (syntax-after (+ pos 2)))
-       (fancy-fill-paragraph--empty-string-at-p pos)
-       (+ pos 2)))
+  (let ((last
+         (save-excursion
+           (goto-char pos)
+           (skip-chars-forward (fancy-fill-paragraph--char-skip-set (char-after pos)) (pos-eol))
+           (1- (point)))))
+    (and (< pos last)
+         (let ((ppss (save-excursion (syntax-ppss (1+ last)))))
+           (and (nth 3 ppss) (eq (nth 8 ppss) last)))
+         (let ((end (fancy-fill-paragraph--sexp-end last)))
+           (and end
+                (<= (- (1+ last) (fancy-fill-paragraph--string-delimiter-length last end)) pos)))
+         last)))
 
 (defsubst fancy-fill-paragraph--syntax-comment-end-class-p (syn-descriptor)
   "Return non-nil if SYN-DESCRIPTOR indicates a `comment-end' character.
@@ -1187,12 +1228,12 @@ When SEL-BOUNDS is non-nil, include its bounds so only overlapping
 paragraphs are filled by the job runner.
 SEARCH-BOUNDS limits line-comment block expansion."
   (declare (important-return-value t))
-  ;; The quotes before a triple quote's fence open the string after them.
+  ;; The quotes before a repeated delimiter's last open the string after them.
   ;; NOTE: mapped here rather than in
   ;; `fancy-fill-paragraph--comment-or-string-start-at' (as the closer's
   ;; quotes are), which returns a start at or before its position.  This
   ;; start follows it, the region scan would take the quotes for code.
-  (setq syn-start (or (fancy-fill-paragraph--string-fence-opener-start syn-start) syn-start))
+  (setq syn-start (or (fancy-fill-paragraph--string-opener-run-start syn-start) syn-start))
   (save-excursion
     (goto-char syn-start)
     (let ((region-beg (pos-bol))
@@ -2058,7 +2099,10 @@ The plist contains:
            body content (indentation + any prefix chars + delimiter +
            trailing space).
 - :text    Opener-line body content after the prefix, or nil when the
-           opener line contains only the delimiter."
+           opener line contains only the delimiter.
+- :repeated Non-nil when the delimiter is repeated, for e.g. Python's
+           triple quotes, opening a string that may span lines, see
+           `fancy-fill-paragraph--string-delimiter-length'."
   (declare (important-return-value t))
   (save-excursion
     (goto-char opener-pos)
@@ -2070,10 +2114,15 @@ The plist contains:
       ;; Defensive fallback: no delimiter found on this line.
       (list :prefix (buffer-substring-no-properties (pos-bol) (pos-eol)) :text nil))
      (t
-      ;; Skip the delimiter characters (e.g. \"\"\", ''').
-      (skip-chars-forward (string (char-after)) (pos-eol))
-      (skip-chars-forward " \t" (pos-eol))
-      (fancy-fill-paragraph--opener-prefix-and-text)))))
+      (let ((repeated
+             (> (fancy-fill-paragraph--string-delimiter-length
+                 (point)
+                 (fancy-fill-paragraph--sexp-end (point)))
+                1)))
+        ;; The delimiter ends where its string starts (e.g. \"\"\", ''').
+        (forward-char 1)
+        (skip-chars-forward " \t" (pos-eol))
+        (append (fancy-fill-paragraph--opener-prefix-and-text) (list :repeated repeated)))))))
 
 (defun fancy-fill-paragraph--fill-string-region (beg end opener-pos &optional sel-beg sel-end)
   "Fill a string in the region BEG..END.
@@ -2084,11 +2133,11 @@ When the delimiters occupy their own lines, fills only the body text
 between them.  When the delimiters share lines with body text (inline
 delimiters), fills the entire region, treating the delimiters as part
 of the text.  Either way a closer on a line of its own stays there,
-while text on the closer line joins the last paragraph."
+while text on the closer line joins the last paragraph.  A string on
+one line is only filled when its delimiter is repeated, otherwise it's
+left as it is."
   (let* ((inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
-         (opener-info
-          (when inner-body
-            (fancy-fill-paragraph--string-opener-info opener-pos)))
+         (opener-info (fancy-fill-paragraph--string-opener-info opener-pos))
          (closer-end (fancy-fill-paragraph--string-end opener-pos))
          (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
          (closer-kind
@@ -2111,6 +2160,13 @@ while text on the closer line joins the last paragraph."
                                                          (and (eq closer-kind 'joins) end)))
      (lambda ()
        (cond
+        ;; NOTE: only a repeated delimiter shows a string on one line may
+        ;; span lines, breaking one opened with a single delimiter is an
+        ;; error in C and Python and changes its value in shell.  Lisp
+        ;; allows it, however the delimiter can't tell Lisp from C, so
+        ;; leave it as it is.
+        ((and (null closer-bol) (not (plist-get opener-info :repeated)))
+         nil)
         ((eq closer-kind 'blocked)
          nil)
         ((eq closer-kind 'alone)

@@ -560,6 +560,50 @@ syntax, it's included for contrast."
 A stand-in for modes such as `yaml-ts-mode', whose grammar may be missing."
  (modify-syntax-entry ?\" "\""))
 
+(defun fancy-fill-paragraph-test-quintuple-syntax-propertize (start end)
+  "Give string fence syntax to one quote of each five-quote delimiter in START..END.
+The opener's last quote and the closer's first, the others reading as
+empty strings, as `python-mode' marks a triple quote."
+  (goto-char start)
+  (while (re-search-forward "\"\\{5\\}" end t)
+    (let ((run-beg (match-beginning 0))
+          (run-end (match-end 0)))
+      (cond
+       ((nth 3 (save-excursion (syntax-ppss run-beg)))
+        (put-text-property run-beg (1+ run-beg) 'syntax-table (string-to-syntax "|")))
+       (t
+        (put-text-property (1- run-end) run-end 'syntax-table (string-to-syntax "|")))))))
+
+(define-derived-mode
+ fancy-fill-paragraph-test-quintuple-mode prog-mode "Quintuple"
+ "A mode whose long strings are delimited by five quotes.
+Marked as `python-mode' marks a triple quote, with more quotes besides
+the fence."
+ (setq-local syntax-propertize-function #'fancy-fill-paragraph-test-quintuple-syntax-propertize))
+
+(ert-deftest fill-syntax-bounds-string-delimiter-any-length ()
+  "A repeated delimiter of any length fills as a triple quote does.
+Its length is read from the runs of its character at each end, the
+quotes beside the one with string syntax reading as empty strings, as
+`python-mode' marks a triple quote."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (fancy-fill-paragraph-test-quintuple-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position
+         "x = \"\"\"\"\"aaa bbb ccc ddd eee fff ggg hhh\"\"\"\"\"\n"
+         0
+         "x = \"\"\"\"\"aaa bbb ccc ddd eee\nfff ggg hhh\"\"\"\"\"\n")
+        (let ((text-initial
+               "x = \"\"\"\"\"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii jjj kkk.\n\"\"\"\"\"\n")
+              (text-expected
+               "x = \"\"\"\"\"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii\njjj kkk.\n\"\"\"\"\"\n"))
+          ;; From the closer line, its quotes are the string's.
+          (dolist (line-index (list 2 3))
+            (should-fill-same-from-every-position text-initial line-index text-expected)))))))
+
 (ert-deftest fill-syntax-bounds-data-mode-keys-beside-strings-untouched ()
   "Keys beside a quoted value are never merged in a data mode.
 Only programming modes took the text beside a string for code, so a
@@ -582,9 +626,8 @@ whole paragraph as prose, merging its keys."
   "Keys and section headers beside a quoted value are never merged.
 `conf-mode' was taken for prose, so a paragraph of them was filled into
 one line, from any line but the string's.  Text beside a string is code
-there, as in a programming mode.  The string's own line is left out, it
-fills the string as in a programming mode.  The last case is a
-preservation case, a comment still fills."
+there, as in a programming mode.  The last case is a preservation case,
+a comment still fills."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 30)
         (sentence-end-double-space nil))
@@ -592,13 +635,13 @@ preservation case, a comment still fills."
       (with-temp-buffer
         (funcall mode)
         (let ((inhibit-message t))
-          (let ((text "[package]\nname = \"foo\"\nversion = \"1.0\"\n"))
+          (dolist (text
+                   (list
+                    "[package]\nname = \"foo\"\nversion = \"1.0\"\n"
+                    "[section]\nkey = \"aaa bbb ccc ddd eee fff ggg hhh iii\"\nother = 1\n"))
             (dotimes (line-index 3)
               (should-fill-same-from-every-position text line-index text))
             (should-fill-selection text 0 text))
-          (let ((text "[section]\nkey = \"aaa bbb ccc ddd eee fff ggg hhh iii\"\nother = 1\n"))
-            (dolist (line-index (list 0 2))
-              (should-fill-same-from-every-position text line-index text)))
           (should-fill-same-from-every-position
            "# aaa bbb ccc ddd eee fff ggg hhh iii jjj\nkey = \"x\"\n"
            0
@@ -2276,7 +2319,8 @@ an unclosed comment from an unclosed string."
   "A triple-quoted string ends after all three closing quotes.
 `python-mode' ends the string at the first closing quote, the two after
 it read as an empty string.  Both such pairs belong to the string, while
-a real empty string stays apart, after a closed string or before code."
+a real empty string stays apart, after a closed string, before code or
+glued before a string opened with one quote."
   (with-temp-buffer
     (python-mode)
     (let ((inhibit-message t))
@@ -2292,8 +2336,8 @@ a real empty string stays apart, after a closed string or before code."
         (should (equal opener (fancy-fill-paragraph--comment-or-string-start-at (1+ text-beg))))
         (should (equal string-end (fancy-fill-paragraph--string-end opener)))
         (should (equal (cons 'string string-end) (fancy-fill-paragraph--syntax-region-at opener)))
-        (should (equal opener (fancy-fill-paragraph--string-fence-opener-start (point-min))))
-        (should (equal opener (fancy-fill-paragraph--string-fence-closer-owner (1+ closer-beg))))
+        (should (equal opener (fancy-fill-paragraph--string-opener-run-start (point-min))))
+        (should (equal opener (fancy-fill-paragraph--string-closer-run-owner (1+ closer-beg))))
         ;; A cursor on the closing quotes is in the string they close.
         (should
          (equal opener (fancy-fill-paragraph--comment-or-string-start-at (+ closer-beg 2)))))))
@@ -2307,8 +2351,8 @@ a real empty string stays apart, after a closed string or before code."
       ;; The empty string after the closing quote is a string of its own.
       (let ((empty-beg (1+ (match-end 0))))
         (should (equal empty-beg (fancy-fill-paragraph--string-end (point-min))))
-        (should-not (fancy-fill-paragraph--string-fence-closer-owner empty-beg))
-        (should-not (fancy-fill-paragraph--string-fence-opener-start (point-min))))))
+        (should-not (fancy-fill-paragraph--string-closer-run-owner empty-beg))
+        (should-not (fancy-fill-paragraph--string-opener-run-start (point-min))))))
   (with-temp-buffer
     (python-mode)
     (let ((inhibit-message t))
@@ -2319,9 +2363,34 @@ a real empty string stays apart, after a closed string or before code."
       ;; The empty string before code opens no string after it.
       (let ((empty-beg (match-beginning 0)))
         (should (equal (+ empty-beg 2) (fancy-fill-paragraph--string-end empty-beg)))
-        (should-not (fancy-fill-paragraph--string-fence-opener-start empty-beg))))))
+        (should-not (fancy-fill-paragraph--string-opener-run-start empty-beg)))))
+  (with-temp-buffer
+    (python-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "x = \"\"\"\"\"\"")
+      (syntax-propertize (point-max))
+      ;; An empty triple-quoted string, its opener and closer are one run of
+      ;; quotes, the closer's quotes are still its own.
+      (let ((opener 7))
+        (should (equal 11 (fancy-fill-paragraph--string-end opener)))
+        (dolist (pos (list 8 9 10))
+          (should (equal opener (fancy-fill-paragraph--comment-or-string-start-at pos)))))))
+  (with-temp-buffer
+    (sh-mode)
+    (let ((inhibit-message t))
+      (buffer-reset-text "echo \"\"\"aaa\" x")
+      (syntax-propertize (point-max))
+      (goto-char (point-min))
+      (search-forward "aaa")
+      ;; Runs of three and one quote, the shorter is the delimiter, the
+      ;; empty string before it is apart.
+      (let ((opener (1- (match-beginning 0))))
+        (should (equal opener (fancy-fill-paragraph--comment-or-string-start-at (1+ opener))))
+        (should (equal (1+ (match-end 0)) (fancy-fill-paragraph--string-end opener)))
+        (should-not (plist-get (fancy-fill-paragraph--string-opener-info opener) :repeated))
+        (should-not (fancy-fill-paragraph--string-opener-run-start (- opener 2)))))))
 
-(ert-deftest string-fence-closer-owner-not-a-comment ()
+(ert-deftest string-closer-run-owner-not-a-comment ()
   "The quotes opening a triple-quoted string below a comment aren't its closer.
 The comment was taken to own them, scanning for its end skips it and
 ends past the quotes.  Scanning the selection's regions then resumed at
@@ -2351,14 +2420,14 @@ the quotes, the comment's end, looping forever."
       (let ((inhibit-message t))
         (buffer-reset-text text-initial)
         (syntax-propertize (point-max))
-        (should-not (fancy-fill-paragraph--string-fence-closer-owner 8))
+        (should-not (fancy-fill-paragraph--string-closer-run-owner 8))
         (should-fill-selection text-initial 0 text-expected)))))
 
 (ert-deftest string-opener-info-splits-delimiter-from-text ()
   "The opener prefix ends after one run of the opening delimiter.
 A quote directly after a backtick opener is text, although a quote is
 a string delimiter too.  String prefix letters and a triple quote stay
-in the prefix."
+in the prefix, the triple quote is repeated."
   (with-temp-buffer
     (js-mode)
     (let ((inhibit-message t))
@@ -2370,7 +2439,7 @@ in the prefix."
       (syntax-propertize (point-max))
       (should
        (equal
-        '(:prefix "`" :text "\"aaa\" bbb")
+        '(:prefix "`" :text "\"aaa\" bbb" :repeated nil)
         (fancy-fill-paragraph--string-opener-info (point-min))))))
   (with-temp-buffer
     (python-mode)
@@ -2383,7 +2452,7 @@ in the prefix."
       (syntax-propertize (point-max))
       (should
        (equal
-        '(:prefix "    r\"\"\"" :text "Alpha bravo")
+        '(:prefix "    r\"\"\"" :text "Alpha bravo" :repeated t)
         (fancy-fill-paragraph--string-opener-info
          (fancy-fill-paragraph--comment-or-string-start-at
           (progn
@@ -4747,6 +4816,87 @@ the body unfilled."
         (should-fill-same-from-every-position text-initial-body 3 text-expected-body)
         (should-fill-same-from-every-position text-initial-defvar 1 text-expected-defvar)
         (should-fill-same-from-every-position text-initial-defvar 3 text-initial-defvar)))))
+
+(ert-deftest fill-syntax-bounds-string-one-line-unchanged ()
+  "A string on one line is left as it is, unless its delimiter is repeated.
+It was filled as prose, breaking it across lines, an error in Python
+and a changed value in shell.  An Emacs Lisp docstring lost its
+indentation.  A repeated delimiter (Python's triple quotes for e.g.)
+opens a string that may span lines, filled as before.  An empty string
+glued before the text isn't one, though its quotes run on."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'python-mode
+               0
+               "x = \"aaa bbb ccc ddd eee fff ggg hhh\"\n"
+               "x = \"aaa bbb ccc ddd eee fff ggg hhh\"\n")
+              (list
+               #'python-mode
+               0
+               "x = 'aaa bbb ccc ddd eee fff ggg hhh'\n"
+               "x = 'aaa bbb ccc ddd eee fff ggg hhh'\n")
+              (list
+               #'sh-mode
+               0
+               "echo \"aaa bbb ccc ddd eee fff ggg hhh\"\n"
+               "echo \"aaa bbb ccc ddd eee fff ggg hhh\"\n")
+              (list
+               #'emacs-lisp-mode
+               1
+               "(defun f ()\n  \"Aaa bbb ccc ddd eee fff ggg hhh.\"\n  nil)\n"
+               "(defun f ()\n  \"Aaa bbb ccc ddd eee fff ggg hhh.\"\n  nil)\n")
+              ;; An empty string beside the text isn't a repeated delimiter.
+              (list
+               #'python-mode
+               0
+               "x = \"\" + \"aaa bbb ccc ddd eee fff ggg hhh\"\n"
+               "x = \"\" + \"aaa bbb ccc ddd eee fff ggg hhh\"\n")
+              ;; Nor is one glued to it.
+              (list
+               #'sh-mode
+               0
+               "printf \"\"\"aaa bbb ccc ddd eee fff ggg hhh\"\n"
+               "printf \"\"\"aaa bbb ccc ddd eee fff ggg hhh\"\n")
+              (list
+               #'c-mode
+               0
+               "x = \"\"\"aaa bbb ccc ddd eee fff ggg hhh\";\n"
+               "x = \"\"\"aaa bbb ccc ddd eee fff ggg hhh\";\n")
+              ;; Preservation: a repeated delimiter.
+              (list
+               #'python-mode
+               0
+               "x = \"\"\"aaa bbb ccc ddd eee fff ggg hhh\"\"\"\n"
+               "x = \"\"\"aaa bbb ccc ddd eee fff\nggg hhh\"\"\"\n")
+              (list
+               #'python-mode
+               0
+               "x = '''aaa bbb ccc ddd eee fff ggg hhh'''\n"
+               "x = '''aaa bbb ccc ddd eee fff\nggg hhh'''\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
+
+(ert-deftest fill-syntax-bounds-string-caret-delimiter-one-line-unchanged ()
+  "A string delimited by `^' on one line is left as it is, as one by `!' is.
+The delimiter was given to `skip-chars-forward' as written, a `^'
+negating the set, so the run of delimiters took the whole line and the
+string was taken for a repeated delimiter, its line wrapped."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20))
+    (with-temp-buffer
+      (perl-mode)
+      (let ((inhibit-message t))
+        (dolist (text
+                 (list
+                  "my $x = q^aaa bbb ccc ddd eee fff ggg^;\n"
+                  "my $x = q!aaa bbb ccc ddd eee fff ggg!;\n"))
+          (should-fill-same-from-every-position text 0 text))))))
 
 (ert-deftest fill-syntax-bounds-string-empty-line-other-modes ()
   "An empty line as the only line before the closer line is kept in other modes.
