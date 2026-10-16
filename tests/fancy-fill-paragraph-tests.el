@@ -5364,11 +5364,12 @@ Two-line strings whose lines share an indentation fill as before."
           (should (equal (nth 2 case) (buffer-string))))))))
 
 (ert-deftest fill-syntax-bounds-python-docstring-opener-dot-point-continuation ()
-  "A dot-point on the opener line keeps the line continuing it as its own.
-A string on two lines, the second hangs past the marker, its
-indentation was taken for the continuation, so the fill hung it again.
-The last cases are preservation cases, a dot-point or text at the
-opener line's indentation is not taken to hang."
+  "A dot-point on the opener line keeps the lines continuing it as its own.
+They hang past its marker, their indentation was taken for the
+doc-string's, so stripped of it they were read as text after the
+dot-point rather than continuing it.  The last cases are preservation
+cases, a dot-point or text at the opener line's indentation is not taken
+to hang."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 30)
         (sentence-end-double-space nil))
@@ -5379,8 +5380,17 @@ opener line's indentation is not taken to hang."
            "    \"\"\"- aaa bbb ccc ddd eee fff\n      ggg hhh iii jjjjjj \"\"\"\n"
            "    \"\"\"- aaa bbb ccc ddd eee\n      fff ggg hhh iii jjjjjj\n    \"\"\"\n")
           (list
+           "    \"\"\"- aaa bbb ccc ddd eee fff\n      ggg hhh iii jjjjjj\n    \"\"\"\n"
+           "    \"\"\"- aaa bbb ccc ddd eee\n      fff ggg hhh iii jjjjjj\n    \"\"\"\n")
+          (list
            "    \"\"\"1. aaa bbb ccc ddd eee fff\n       ggg hhh iii jjjjjj \"\"\"\n"
            "    \"\"\"1. aaa bbb ccc ddd eee\n       fff ggg hhh iii jjjjjj\n    \"\"\"\n")
+          (list
+           "x = \"\"\"- aaa bbb ccc ddd eee fff\n  ggg hhh iii jjjjjj\n\"\"\"\n"
+           "x = \"\"\"- aaa bbb ccc ddd eee\n  fff ggg hhh iii jjjjjj\n\"\"\"\n")
+          (list
+           "    \"\"\"- aaa bbb ccc ddd eee fff\n      ggg hhh iii jjjjjj\n\n    Kkk lll.\n    \"\"\"\n"
+           "    \"\"\"- aaa bbb ccc ddd eee\n      fff ggg hhh iii jjjjjj\n\n    Kkk lll.\n    \"\"\"\n")
           ;; Preservation.
           (list
            "    \"\"\"- aaa bbb ccc ddd eee fff\n      ggg hhh iii jjjjjj\n    - kkk\n    \"\"\"\n"
@@ -5388,6 +5398,28 @@ opener line's indentation is not taken to hang."
           (list
            "    \"\"\"- aaa bbb ccc ddd eee fff\n    ggg hhh iii jjjjjj\n    \"\"\"\n"
            "    \"\"\"- aaa bbb ccc ddd eee\n      fff\n    ggg hhh iii jjjjjj\n    \"\"\"\n")))
+      (with-temp-buffer
+        (python-mode)
+        (let ((inhibit-message t))
+          (dotimes (line-index 2)
+            (should-fill-same-from-every-position (nth 0 case) line-index (nth 1 case))))))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-opener-no-dot-point-unchanged ()
+  "Lines after the opener line keep their indentation without a dot-point.
+Text on the opener line that isn't a dot-point leaves the lines after
+it at their indentation, as does a dot-point under it, hanging on its
+own marker."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               "    \"\"\"Aaa bbb ccc ddd eee fff\n      ggg hhh iii jjjjjj\n    \"\"\"\n"
+               "    \"\"\"Aaa bbb ccc ddd eee fff\n      ggg hhh iii jjjjjj\n    \"\"\"\n")
+              (list
+               "    \"\"\"- aaa\n      - bbb ccc ddd eee fff ggg hhh iii\n    \"\"\"\n"
+               "    \"\"\"- aaa\n      - bbb ccc ddd eee fff\n        ggg hhh iii\n    \"\"\"\n")))
       (with-temp-buffer
         (python-mode)
         (let ((inhibit-message t))
