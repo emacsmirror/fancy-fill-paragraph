@@ -4520,8 +4520,9 @@ opener, an example indented deeper than the doc-string."
 (ert-deftest fill-syntax-bounds-python-string-closer-shallower-than-text ()
   "A string's wrapped first line keeps its text's indentation.
 The closer line is less indented than the text, it was taken for the
-indentation of the lines continuing the opener line.  After code, it's
-not taken for a summary line on its own either."
+indentation of the lines continuing the opener line.  A summary line on
+its own has no text of its own to read, so it takes the closer's
+indentation, with code after the closer too."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 40)
         (sentence-end-double-space nil)
@@ -4548,7 +4549,7 @@ not taken for a summary line on its own either."
          ;; format-next-line: off
          (concat "def f():\n"
                  "    parser.add(help=\"\"\"Aaa bbb ccc ddd\n"
-                 "        eee fff.\n"
+                 "    eee fff.\n"
                  "\n"
                  "        Ggg hhh iii jjj kkk.\n"
                  "    \"\"\")\n"))
@@ -4759,7 +4760,8 @@ The string was taken for a two-line one, filling dropped the empty line."
   "Each paragraph of a docstring fills alone, the empty line kept.
 This is the usual layout of a short Emacs Lisp docstring.  The string
 was taken for a two-line one, filling dropped the empty line or left
-the body unfilled."
+the body unfilled.  A closing parenthesis after the closer isn't code,
+the body fills as it does without one."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 30)
         (sentence-end-double-space nil)
@@ -4793,7 +4795,6 @@ the body unfilled."
                  "Body iii jjj kkk lll mmm nnn\n"
                  "ooo ppp qqq.\"\n"
                  "  nil)\n"))
-        ;; Code after the closer, the body stays as it is.
         (text-initial-defvar
          ;; format-next-line: off
          (concat "(defvar v nil\n"
@@ -4806,7 +4807,14 @@ the body unfilled."
                  "  \"Summary aaa bbb ccc ddd eee\n"
                  "fff ggg hhh.\n"
                  "\n"
-                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.\")\n")))
+                 "Body iii jjj kkk lll mmm nnn ooo ppp qqq.\")\n"))
+        (text-expected-defvar-body
+         ;; format-next-line: off
+         (concat "(defvar v nil\n"
+                 "  \"Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn\n"
+                 "ooo ppp qqq.\")\n")))
     (with-temp-buffer
       (emacs-lisp-mode)
       (let ((inhibit-message t))
@@ -4815,7 +4823,7 @@ the body unfilled."
         (should-fill-same-from-every-position text-initial-summary 3 text-initial-summary)
         (should-fill-same-from-every-position text-initial-body 3 text-expected-body)
         (should-fill-same-from-every-position text-initial-defvar 1 text-expected-defvar)
-        (should-fill-same-from-every-position text-initial-defvar 3 text-initial-defvar)))))
+        (should-fill-same-from-every-position text-initial-defvar 3 text-expected-defvar-body)))))
 
 (ert-deftest fill-syntax-bounds-string-one-line-unchanged ()
   "A string on one line is left as it is, unless its delimiter is repeated.
@@ -4901,7 +4909,8 @@ string was taken for a repeated delimiter, its line wrapped."
 (ert-deftest fill-syntax-bounds-string-empty-line-other-modes ()
   "An empty line as the only line before the closer line is kept in other modes.
 Covers a C string and JavaScript template strings, with and without code
-around them."
+around them.  A semicolon glued to the closer isn't code, the body
+fills."
   (let ((fancy-fill-paragraph-syntax-bounds t)
         (fill-column 30)
         (sentence-end-double-space nil)
@@ -4927,6 +4936,12 @@ around them."
                  "ddd eee fff ggg hhh.\n"
                  "\n"
                  "Body iii jjj kkk lll mmm nnn ooo ppp qqq.`;\n"))
+        (text-expected-js-body
+         ;; format-next-line: off
+         (concat "const s = `Summary aaa bbb ccc ddd eee fff ggg hhh.\n"
+                 "\n"
+                 "Body iii jjj kkk lll mmm nnn\n"
+                 "ooo ppp qqq.`;\n"))
         ;; No code around the string, so the body fills too.
         (text-initial-js-bare
          ;; format-next-line: off
@@ -4955,11 +4970,74 @@ around them."
       (js-mode)
       (let ((inhibit-message t))
         (should-fill-same-from-every-position text-initial-js 0 text-expected-js)
-        (should-fill-same-from-every-position text-initial-js 2 text-initial-js)
+        (should-fill-same-from-every-position text-initial-js 2 text-expected-js-body)
         (should-fill-same-from-every-position text-initial-js-bare 0 text-expected-js-bare-summary)
         (should-fill-same-from-every-position text-initial-js-bare 1 text-initial-js-bare)
         (should-fill-same-from-every-position
          text-initial-js-bare 2 text-expected-js-bare-body)))))
+
+(ert-deftest fill-syntax-bounds-closer-before-closing-delimiters-fills ()
+  "A closer followed by closing delimiters fills as one followed by nothing.
+Any text after the closer was taken for code, so a closer line ending
+an expression (`\")' ending an Emacs Lisp doc-string, `\"\"\")' or `\"\"\",'
+in Python, `);' or `*/);' for e.g.) was never filled.  Glued to the
+closer, the delimiters are read from the syntax table and move with it.
+With the cursor on such a line, its last character is past the closer,
+so the string before it is found too.  The last cases are preservation
+cases, code after the closer is left alone, as is a Lisp string on one
+line."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'emacs-lisp-mode
+               3
+               "(defvar foo nil\n  \"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii jjj kkk.\")\n"
+               "(defvar foo nil\n  \"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii\njjj kkk.\")\n")
+              (list
+               #'python-mode
+               2
+               "x = f(\"\"\"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii jjj kkk.\"\"\")\n"
+               "x = f(\"\"\"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii\njjj kkk.\"\"\")\n")
+              (list
+               #'python-mode
+               3
+               "x = [\n    \"\"\"Aaa bbb.\n\n    ccc ddd eee fff ggg hhh iii jjj kkk.\"\"\",\n]\n"
+               (concat
+                "x = [\n    \"\"\"Aaa bbb.\n\n    ccc ddd eee fff ggg hhh\n"
+                "    iii jjj kkk.\"\"\",\n]\n"))
+              (list
+               #'python-mode
+               0
+               "x = f(\"\"\"aaa bbb ccc ddd eee fff ggg hhh iii\"\"\")\n"
+               "x = f(\"\"\"aaa bbb ccc ddd eee\nfff ggg hhh iii\"\"\")\n")
+              (list
+               #'js-mode
+               2
+               "foo(`Aaa bbb.\n\nccc ddd eee fff ggg hhh iii jjj kkk.`);\n"
+               "foo(`Aaa bbb.\n\nccc ddd eee fff ggg hhh iii\njjj kkk.`);\n")
+              (list
+               #'c-mode
+               0
+               "foo(/* aaa bbb\n       ccc ddd eee fff ggg hhh iii */);\n"
+               "foo(/* aaa bbb ccc ddd eee fff\n     * ggg hhh iii */);\n")
+              ;; Preservation.
+              (list
+               #'python-mode
+               2
+               "x = \"\"\"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii jjj kkk.\"\"\" + y\n"
+               "x = \"\"\"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii jjj kkk.\"\"\" + y\n")
+              (list
+               #'emacs-lisp-mode
+               0
+               "(message \"aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\")\n"
+               "(message \"aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\")\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
 
 (ert-deftest fill-syntax-bounds-region-docstring-empty-line ()
   "Selecting a whole docstring fills each paragraph, the empty line kept.
@@ -5391,6 +5469,25 @@ a closer such as `  */' and leaving the comment unclosed."
            (concat "/* aaa bbb ccc ddd\n"
                    " * eee fff ggg hhh\n"
                    closer "\n")))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-region-closing-elsewhere-errors ()
+  "A comment region its comment doesn't close in is an error, not filled.
+Only the region's end was checked to be within the comment, so a region
+ending before the comment's closer line was accepted.  Its last line is
+taken for the closer line, filling it could join the code after the
+region as comment text."
+  (with-temp-buffer
+    (c-mode)
+    (let ((inhibit-message t))
+      (insert "/* aaa\n * bbb */\n")
+      (syntax-propertize (point-max))
+      (should-error
+       (fancy-fill-paragraph--fill-block-comment-region
+        (point-min)
+        (save-excursion
+          (goto-char (point-min))
+          (pos-eol))
+        (point-min))))))
 
 (ert-deftest fill-syntax-bounds-closer-after-abbreviation ()
   "A closer after a dotted abbreviation keeps a single space before it.

@@ -933,14 +933,20 @@ paragraph scanning should widen the returned bounds themselves."
         (cons (point) body-end)))))
 
 (defun fancy-fill-paragraph--code-after-closer-p (closer-end)
-  "Return non-nil when non-blank text follows CLOSER-END on its line.
+  "Return non-nil when code follows CLOSER-END on its line.
 CLOSER-END is the position just after a comment or string closing
 delimiter.  Trailing code on the closer line must never be reflowed
 as comment or string text, so callers skip inline filling for such
-regions."
+regions.
+NOTE: closing delimiters and punctuation glued to the closer, read from
+the syntax table (`\")' ending a Lisp doc-string, `\"\"\"),' or `*/);'
+for e.g.), aren't counted.  They end the expression holding the string
+or comment and are filled with the closer as one word, never apart from
+it, so no code is merged into the text."
   (declare (important-return-value t))
   (save-excursion
     (goto-char closer-end)
+    (skip-syntax-forward ")." (pos-eol))
     (skip-chars-forward " \t" (pos-eol))
     (not (eolp))))
 
@@ -1346,8 +1352,17 @@ Returns nil when no syntax boundaries are found, and when
         ;; its line, so the column never changes the result.
         (let ((syn-start
                (or (fancy-fill-paragraph--comment-or-string-start-at beg)
-                   (fancy-fill-paragraph--comment-or-string-start-at
-                    (fancy-fill-paragraph--line-last-non-blank pos)))))
+                   (let ((last (fancy-fill-paragraph--line-last-non-blank pos)))
+                     (or (fancy-fill-paragraph--comment-or-string-start-at last)
+                         ;; NOTE: closing delimiters after a closer aren't
+                         ;; code, see `fancy-fill-paragraph--code-after-closer-p',
+                         ;; so the line is probed before them too (`\")' ending a
+                         ;; Lisp doc-string for e.g.).
+                         (fancy-fill-paragraph--comment-or-string-start-at
+                          (save-excursion
+                            (goto-char (1+ last))
+                            (skip-syntax-backward ")." (pos-bol))
+                            (max (pos-bol) (1- (point))))))))))
           (when syn-start
             (goto-char syn-start)))
         (while (< (point) end)
@@ -2003,10 +2018,16 @@ excluded from the returned content."
     (beg end comment-start-pos cont-prefix opener-col)
   "Fill an inline block comment in BEG..END using CONT-PREFIX.
 OPENER-COL is the column where content begins after the opener delimiter."
-  (unless (eq
-           comment-start-pos
-           (ppss-comment-or-string-start (save-excursion (syntax-ppss (1- end)))))
-    (error "Expected comment at %d" comment-start-pos))
+  ;; Closing delimiters glued to the closer may follow it on its line, see
+  ;; `fancy-fill-paragraph--code-after-closer-p'.  A comment that never
+  ;; closes runs to END.
+  (unless (let ((closer-end
+                 (save-excursion
+                   (goto-char comment-start-pos)
+                   (and (forward-comment 1) (point)))))
+            (or (null closer-end)
+                (and (<= closer-end end) (< (fancy-fill-paragraph--last-bol end) closer-end))))
+    (error "Expected comment at %d to close on line ending at %d" comment-start-pos end))
   (let* ((prefix-col (fancy-fill-paragraph--prefix-column-width beg cont-prefix))
          (opener-text
           (save-excursion
