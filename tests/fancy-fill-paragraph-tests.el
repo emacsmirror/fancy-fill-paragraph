@@ -2297,6 +2297,47 @@ the first list item or the first indentation group."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-double-space-not-after-dotted-word ()
+  "A word holding a period (a file name for e.g.) isn't a sentence end.
+Any character after a period was taken for closing punctuation, so the
+space after `foo.c' was doubled.  A closing quote or bracket after the
+period still ends a sentence, as does a closer after it in a comment."
+  (let ((fill-column 80)
+        (sentence-end-double-space t))
+    (with-fancy-fill-paragraph-test "See foo.c and bar.h. (Here.) Then \"this.\" Done.\n"
+      (fancy-fill-paragraph)
+      (should (equal "See foo.c and bar.h.  (Here.)  Then \"this.\"  Done.\n" (buffer-string)))))
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space t))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position
+         "/* Aaa bbb\n * see foo.c */\n" 0 "/* Aaa bbb see foo.c */\n")
+        (should-fill-same-from-every-position
+         "/* Aaa bbb\n * see foo. */\n" 0 "/* Aaa bbb see foo.  */\n")))))
+
+(ert-deftest fill-double-space-after-closer-unchanged ()
+  "Each closing quote, guillemet or bracket after punctuation ends a sentence.
+A preservation case for `fill-double-space-not-after-dotted-word', a
+dotted abbreviation and a period before a comma keep a single space."
+  (let ((fill-column 200)
+        (sentence-end-double-space t))
+    (with-fancy-fill-paragraph-test
+        (concat
+         "Aaa.) Bbb.] Ccc.} Ddd.\" Eee.' Fff.\u201D Ggg.\u2019 Hhh?) Iii!\" Jjj\u2026) "
+         "\u00ABLll.\u00BB \u2039Mmm.\u203A "
+         "Kkk. The U.S. and e.g., then etc., done.\n")
+      (fancy-fill-paragraph)
+      (should
+       (equal
+        (concat
+         "Aaa.)  Bbb.]  Ccc.}  Ddd.\"  Eee.'  Fff.\u201D  Ggg.\u2019  Hhh?)  Iii!\"  Jjj\u2026)  "
+         "\u00ABLll.\u00BB  \u2039Mmm.\u203A  "
+         "Kkk.  The U.S. and e.g., then etc., done.\n")
+        (buffer-string))))))
+
 (ert-deftest fill-abbreviation-single-space-preserved-with-double-space ()
   "Single space after an abbreviation period should be preserved."
   (let ((text-initial "alpha beta e.g. gamma delta epsilon zeta eta theta\n")

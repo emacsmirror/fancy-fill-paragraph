@@ -133,12 +133,16 @@ Argument _POS is ignored."
   " ")
 
 (defsubst fancy-fill-paragraph--sentence-end-boundary-p (text split-pos)
-  "Return non-nil when TEXT at SPLIT-POS follows sentence punctuation."
+  "Return non-nil when TEXT at SPLIT-POS follows sentence punctuation.
+The punctuation may be followed by a closing quote, guillemet or
+bracket (`.)' for e.g.), as in `sentence-end-base', any other character
+after it makes it part of a word (`foo.c' for e.g.)."
   (declare (important-return-value t))
   (and (> split-pos 0)
        (or (memq (aref text (1- split-pos)) '(?. ?? ?! ?\u2026))
            (and (>= split-pos 2)
-                (not (memq (aref text (1- split-pos)) '(?, ?\; ?:)))
+                (memq
+                 (aref text (1- split-pos)) '(?\) ?\] ?\} ?\" ?' ?\u201D ?\u2019 ?\u00BB ?\u203A))
                 (memq (aref text (- split-pos 2)) '(?. ?? ?! ?\u2026))))))
 
 (defsubst fancy-fill-paragraph--dotted-abbreviation-boundary-p (text split-pos)
