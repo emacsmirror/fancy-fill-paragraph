@@ -4554,6 +4554,84 @@ the closer line is left as it is."
         (should-fill-same-from-every-position text-initial 2 text-expected-last)
         (should-fill-same-from-every-position text-initial 0 text-expected-first)))))
 
+(ert-deftest fill-syntax-bounds-string-closer-line-text-indent-counts ()
+  "Text on a string's closer line counts toward its paragraph's indentation.
+Only the lines before it counted, so the closer line's text moved to a
+deeper body line's indentation.  Each case now fills as with the closer
+alone on its line, see
+`fill-syntax-bounds-string-closer-alone-line-indent-unchanged'.
+The last cases are preservation cases, a two-line string of dot-points
+keeps its second item at its marker's indentation on a second fill."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 30))
+    (dolist (case
+             (list
+              (list
+               #'python-mode
+               0
+               "    \"\"\"Aaa bbb ccc\n        ddd eee\n    fff ggg.\"\"\"\n"
+               "    \"\"\"Aaa bbb ccc\n        ddd eee\n    fff ggg.\"\"\"\n")
+              (list
+               #'python-mode
+               0
+               "    \"\"\"Aaa bbb ccc ddd eee fff ggg\n      hhh\n    iii.\"\"\"\n"
+               "    \"\"\"Aaa bbb ccc ddd eee fff\n    ggg\n      hhh\n    iii.\"\"\"\n")
+              (list
+               #'emacs-lisp-mode
+               1
+               "(defun f ()\n  \"Aaa bbb ccc ddd eee fff ggg.\n  Hhh iii\njjj.\"\n  nil)\n"
+               "(defun f ()\n  \"Aaa bbb ccc ddd eee fff\nggg.\n  Hhh iii\njjj.\"\n  nil)\n")
+              ;; Preservation.
+              (list
+               #'python-mode
+               0
+               "    \"\"\"- Aaa bbb ccc ddd eee fff ggg\n    - Hhh iii.\"\"\"\n"
+               "    \"\"\"- Aaa bbb ccc ddd eee\n      fff ggg\n    - Hhh iii.\"\"\"\n")
+              (list
+               #'python-mode
+               0
+               "    \"\"\"Aaa bbb ccc\n        ddd eee\n    \"\"\"\n"
+               "    \"\"\"Aaa bbb ccc ddd eee\n    \"\"\"\n")
+              (list
+               #'python-mode
+               0
+               "    \"\"\"Aaa bbb ccc\n    ddd eee\n    fff ggg.\"\"\"\n"
+               "    \"\"\"Aaa bbb ccc ddd eee fff\n    ggg.\"\"\"\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
+
+(ert-deftest fill-syntax-bounds-string-closer-alone-line-indent-unchanged ()
+  "A string's closer alone on its line leaves the indentation as it was.
+The forms of `fill-syntax-bounds-string-closer-line-text-indent-counts'
+with the closer on a line of its own."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 30))
+    (dolist (case
+             (list
+              (list
+               #'python-mode
+               0
+               "    \"\"\"Aaa bbb ccc\n        ddd eee\n    fff ggg.\n    \"\"\"\n"
+               "    \"\"\"Aaa bbb ccc\n        ddd eee\n    fff ggg.\n    \"\"\"\n")
+              (list
+               #'python-mode
+               0
+               "    \"\"\"Aaa bbb ccc ddd eee fff ggg\n      hhh\n    iii.\n    \"\"\"\n"
+               "    \"\"\"Aaa bbb ccc ddd eee fff\n    ggg\n      hhh\n    iii.\n    \"\"\"\n")
+              (list
+               #'emacs-lisp-mode
+               1
+               "(defun f ()\n  \"Aaa bbb ccc ddd eee fff ggg.\n  Hhh iii\njjj.\n\"\n  nil)\n"
+               "(defun f ()\n  \"Aaa bbb ccc ddd eee fff\nggg.\n  Hhh iii\njjj.\n\"\n  nil)\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
+
 (ert-deftest fill-syntax-bounds-python-docstring-closer-alone-stays ()
   "Closing quotes on a line of their own are not joined to the text.
 Filling may shrink the docstring to two lines, after which it fills as

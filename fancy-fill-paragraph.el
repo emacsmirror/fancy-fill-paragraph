@@ -2079,7 +2079,7 @@ Returns non-nil when the buffer was modified."
                                                    closer)))
 
 (defun fancy-fill-paragraph--string-continuation-prefix
-    (body-beg closer-bol closer-alone &optional opener-hang opener-col)
+    (body-beg closer-bol closer-kind &optional opener-hang opener-col)
   "Return the continuation prefix for a multi-line string with opener text.
 BODY-BEG starts the first line after the opener line, CLOSER-BOL starts
 the closer line, the same line when there are no lines between them.
@@ -2090,11 +2090,12 @@ the opener line's indentation.  The lines continuing such a dot-point
 hang past its marker, so its width is taken off their indentation,
 unless that's less than OPENER-COL, the lines then being under the
 marker.  When the opener line is a paragraph of its own (a summary line
-for e.g.), the closer line's indentation is used when CLOSER-ALONE is
-non-nil, the closer alone on its line (see
+for e.g.), the closer line's indentation is used when CLOSER-KIND is
+`alone', the closer alone on its line (see
 `fancy-fill-paragraph--closer-line-kind'), otherwise the least
 indentation of the non-blank lines after it, the closer line when there
-are none.
+are none.  When CLOSER-KIND is `joins', the closer line's text is part
+of its paragraph, so its indentation counts too.
 
 NOTE: a closer alone on its line is preferred to the text, which could
 be an indented example alone (a Python doc-test for e.g.), deeper than
@@ -2112,7 +2113,11 @@ the doc-string.  Otherwise the closer may be less indented than the text
                (skip-chars-forward " \t" (pos-eol))
                (cond
                 ((= (pos-bol) closer-bol)
-                 (setq closer-indent (buffer-substring-no-properties (pos-bol) (point))))
+                 (setq closer-indent (buffer-substring-no-properties (pos-bol) (point)))
+                 (when (and (eq closer-kind 'joins)
+                            in-first-para
+                            (or (null body-col) (< (current-column) body-col)))
+                   (setq para-indent closer-indent)))
                 ((eolp)
                  (setq in-first-para nil))
                 ((or (null body-col) (< (current-column) body-col))
@@ -2131,7 +2136,7 @@ the doc-string.  Otherwise the closer may be less indented than the text
         (substring para-indent 0 (- opener-hang)))
        (para-indent
         para-indent)
-       ((and closer-alone closer-indent)
+       ((and (eq closer-kind 'alone) closer-indent)
         closer-indent)
        (t
         (or body-indent closer-indent ""))))))
@@ -2557,7 +2562,7 @@ line's indentation."
                     (plist-get opener-info :text)
                     (fancy-fill-paragraph--compile-dot-point-patterns))))
               (fancy-fill-paragraph--string-continuation-prefix
-               (car inner-body) closer-bol (eq closer-kind 'alone)
+               (car inner-body) closer-bol closer-kind
                (and dp-match (string-width (cdr dp-match)))
                (fancy-fill-paragraph--string-column-width
                 (fancy-fill-paragraph--leading-indent-string (plist-get opener-info :prefix))))))))
