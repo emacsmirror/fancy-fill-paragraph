@@ -5023,6 +5023,13 @@ line."
                0
                "foo(/* aaa bbb\n       ccc ddd eee fff ggg hhh iii */);\n"
                "foo(/* aaa bbb ccc ddd eee fff\n     * ggg hhh iii */);\n")
+              ;; A closer that doesn't fit wraps alone, its delimiters with it,
+              ;; not after the continuation prefix as a word (` * */);').
+              (list
+               #'c-mode
+               1
+               "foo(a, /* aaa bbb ccc ddd\n       eee fff ggg hhh iii jjj */);\n"
+               "foo(a, /* aaa bbb ccc ddd eee\n        * fff ggg hhh iii jjj\n        */);\n")
               ;; Preservation.
               (list
                #'python-mode
@@ -5489,6 +5496,129 @@ region as comment text."
           (pos-eol))
         (point-min))))))
 
+(ert-deftest fill-syntax-bounds-block-comment-wrapped-closer-alone ()
+  "A closer wrapped onto a line of its own is laid out as a closer alone.
+Joined to the last paragraph, the closer was filled as a word, so when
+it didn't fit it took the continuation prefix (` * */').  A closer
+already on a line of its own is kept as ` */', the fill matches it, as
+it does a closer line written as ` * */'.  A prefix not starting the
+closer is blanked, `pascal-mode' wrapped `|*)' after its `|' prefix.
+The last C case was found in practice, the comma weight breaking the
+first line early so the closer was all that didn't fit."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list
+                   16
+                   nil
+                   "/* aaa bbb ccc\n * ddd eee fff */\n"
+                   "/* aaa bbb ccc\n * ddd eee fff\n */\n")
+                  (list
+                   16
+                   nil
+                   "/* aaa bbb ccc ddd eee fff */\n"
+                   "/* aaa bbb ccc\n * ddd eee fff\n */\n")
+                  ;; Already alone, for contrast.
+                  (list
+                   16
+                   nil
+                   "/* aaa bbb ccc\n * ddd eee fff\n */\n"
+                   "/* aaa bbb ccc\n * ddd eee fff\n */\n")
+                  ;; Written with the prefix.
+                  (list
+                   16
+                   nil
+                   "/* aaa bbb ccc\n * ddd eee fff\n * */\n"
+                   "/* aaa bbb ccc\n * ddd eee fff\n */\n")
+                  ;; Tabs indenting the prefix are kept.
+                  (list
+                   22
+                   nil
+                   "\t/* aaa bbb ccc\n\t * ddd eee fff */\n"
+                   "\t/* aaa bbb ccc\n\t * ddd eee fff\n\t */\n")
+                  (list
+                   99 (list :comma 80)
+                   (concat
+                    "/* When building as a Python module, don't use special argument handling\n"
+                    " * so the module loading logic can control the `argv` & `argc`. */\n")
+                   (concat
+                    "/* When building as a Python module,\n"
+                    " * don't use special argument handling so the module loading logic"
+                    " can control the `argv` & `argc`.\n"
+                    " */\n"))))
+          (let ((fill-column (nth 0 case))
+                (fancy-fill-paragraph-split-weights (nth 1 case)))
+            (should-fill-same-from-every-position (nth 2 case) 0 (nth 3 case))
+            (should-fill-selection (nth 2 case) 0 (nth 3 case))))))
+    (with-temp-buffer
+      (pascal-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list 20 "(* aaa bbb ccc ddd *)\n" "(* aaa bbb ccc ddd\n *)\n")
+                  (list 20 "{ aaa bbb ccc ddd ee }\n" "{ aaa bbb ccc ddd ee\n }\n")
+                  (list 22 "  (* aaa bbb ccc ddd *)\n" "  (* aaa bbb ccc ddd\n   *)\n")))
+          (let ((fill-column (nth 0 case)))
+            (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case))
+            (should-fill-selection (nth 1 case) 0 (nth 2 case))))))))
+
+(ert-deftest fill-syntax-bounds-block-comment-closer-kept-on-last-line ()
+  "A closer that fits stays on the last line, however the text breaks.
+Filled as a word, the closer could be broken before to suit the solver,
+after a sentence weighted to split for e.g., although it fit.
+A closer glued to text is part of a word, filled as before.
+The last case was found in practice."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list
+                   30
+                   (list :period 95)
+                   0
+                   "/* Aaa bbb ccc. Ddd eee fff. */\n"
+                   "/* Aaa bbb ccc.\n * Ddd eee fff. */\n")
+                  (list
+                   30
+                   (list :period 95)
+                   0
+                   "/* Aaa bbb ccc. Ddd eee fff.\n * Ggg hhh. */\n"
+                   "/* Aaa bbb ccc.\n * Ddd eee fff.\n * Ggg hhh. */\n")
+                  ;; Preservation: glued to text.
+                  (list
+                   30
+                   (list :period 95)
+                   0
+                   "/* Aaa bbb ccc. Ddd eee fff.*/\n"
+                   "/* Aaa bbb ccc.\n * Ddd eee fff.*/\n")
+                  (list
+                   99 (list :period 95 :comma 80) 0.9
+                   (concat
+                    "  /* Use the v2 Level Zero adapter of the SYCL unified runtime."
+                    " As a fix for #159584, the v1 Level\n"
+                    "   * Zero adapter is not included. While the Cycles oneAPI device"
+                    " sets this as well, we also need\n"
+                    "   * the environment variable for the use of Open Image Denoise"
+                    " in the compositor. */\n")
+                   (concat
+                    "  /* Use the v2 Level Zero adapter of the SYCL unified runtime.\n"
+                    "   * As a fix for #159584, the v1 Level Zero adapter is not included.\n"
+                    "   * While the Cycles oneAPI device sets this as well,\n"
+                    "   * we also need the environment variable for the use of Open Image Denoise"
+                    " in the compositor. */\n"))))
+          (let ((fill-column (nth 0 case))
+                (fancy-fill-paragraph-split-weights (nth 1 case))
+                (fancy-fill-paragraph-fill-column-target (nth 2 case)))
+            (should-fill-same-from-every-position (nth 3 case) 0 (nth 4 case))
+            (should-fill-selection (nth 3 case) 0 (nth 4 case))))))))
+
 (ert-deftest fill-syntax-bounds-closer-after-abbreviation ()
   "A closer after a dotted abbreviation keeps a single space before it.
 A double space typed before the closer was kept, it's collapsed as
@@ -5516,6 +5646,147 @@ is still doubled."
         (let ((inhibit-message t)
               (fill-column 70))
           (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
+
+(ert-deftest fill-syntax-bounds-closer-alone-takes-prefix ()
+  "A closer on a line of its own takes the continuation prefix.
+A dot-point's hanging indent isn't followed, after one the closer is
+under the dash, in the opener's paragraph or a later one.  A C closer
+drops the prefix's mark."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 30))
+    (dolist (case
+             (list
+              (list
+               #'python-mode
+               2
+               "    \"\"\"Aaa.\n\n    - aaa bbb ccc ddd eee fff ggg hhh iii jjjjjjjjj \"\"\"\n"
+               (concat
+                "    \"\"\"Aaa.\n\n    - aaa bbb ccc ddd eee fff\n"
+                "      ggg hhh iii jjjjjjjjj\n    \"\"\"\n"))
+              (list
+               #'c-mode
+               0
+               "/* - aaa bbb ccc ddd eee fff ggg hhh iii jjjjjjjjjjj */\n"
+               "/* - aaa bbb ccc ddd eee fff\n *   ggg hhh iii jjjjjjjjjjj\n */\n")
+              (list
+               #'python-mode
+               0
+               "    \"\"\"Aaa bbb ccc ddd eee fff ggg hhh iii jjjjjjjjjjjjjj \"\"\"\n"
+               "    \"\"\"Aaa bbb ccc ddd eee fff\n    ggg hhh iii jjjjjjjjjjjjjj\n    \"\"\"\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
+
+(ert-deftest fill-syntax-bounds-closer-within-fill-column-margin ()
+  "A closer follows the text when it fits within the margin, as the text does.
+With the closer held out of the fill, it was fit within `fill-column',
+so it ran into `fancy-fill-paragraph-fill-column-margin' where the text
+wraps before it.  The last case is a preservation case, the closer fits."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-fill-column-margin 4)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'c-mode 0 "/* Aaa bbb ccc ddd eee fff */\n" "/* Aaa bbb ccc ddd eee fff\n */\n")
+              ;; A later paragraph, filled without a prefix.
+              (list
+               #'python-mode
+               3
+               "def f():\n    \"\"\"Aaa.\n\n    Bbb ccc ddd eee fff gg \"\"\"\n"
+               "def f():\n    \"\"\"Aaa.\n\n    Bbb ccc ddd eee fff gg\n    \"\"\"\n")
+              ;; Preservation.
+              (list #'c-mode 0 "/* Aaa bbb ccc ddd eee */\n" "/* Aaa bbb ccc ddd eee */\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column 30))
+          (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
+
+(ert-deftest fill-syntax-bounds-html-comment-closer-held-out ()
+  "An HTML comment's closer is held out of the fill as a C one is.
+Only its `>' has comment syntax, so `-->' was filled as a word, wrapped
+after the continuation prefix (` !-- -->').  A closer alone is laid out
+with the prefix blanked before it, its characters aren't taken for text."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (html-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list
+                   20
+                   "<!-- aaa bbb ccc ddd eee fff ggg hhh -->\n"
+                   "<!-- aaa bbb ccc ddd\n !-- eee fff ggg hhh\n   -->\n")
+                  (list
+                   22
+                   "  <!-- aaa bbb ccc ddd eee fff ggg hhh -->\n"
+                   "  <!-- aaa bbb ccc ddd\n   !-- eee fff ggg hhh\n     -->\n")
+                  ;; The closer follows the text when it fits.
+                  (list
+                   24
+                   "<!-- aaa bbb ccc ddd eee fff -->\n"
+                   "<!-- aaa bbb ccc ddd eee\n !-- fff -->\n")))
+          ;; In a prose mode a selection fills as prose, so only the cursor.
+          (let ((fill-column (nth 0 case)))
+            (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case))))))))
+
+(ert-deftest fill-syntax-bounds-two-line-block-comment-closer-line-as-longer ()
+  "A two-line comment keeps or joins its closer line as a longer one does.
+A closer line was kept when no wider than the continuation prefix, text
+or not.  So a closer alone but wider (`  */') joined the text.  Narrow
+text (`  x */') is still kept, the longer layout takes such a line for a
+paragraph separator.  Text glued to the closer is read as the closer
+alone, kept in both layouts.  Text beside the closer still joins, GNU
+style or prefixed."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  ;; A closer alone stays, as in the longer layout (last case).
+                  (list
+                   20
+                   "/* aaa bbb ccc ddd eee fff\n  */\n"
+                   "/* aaa bbb ccc ddd\n * eee fff\n  */\n")
+                  (list 70 "/* aaa bbb\n  */\n" "/* aaa bbb\n  */\n")
+                  (list 70 "/* aaa bbb\n **/\n" "/* aaa bbb\n **/\n")
+                  (list 70 "/* aaa bbb\n */\n" "/* aaa bbb\n */\n")
+                  (list 70 "/* aaa bbb\n * ccc\n  */\n" "/* aaa bbb ccc\n  */\n")
+                  ;; Narrow text is kept, as in the longer layout (last case).
+                  (list 70 "    /* aaa\n  x */\n" "    /* aaa\n  x */\n")
+                  (list 70 "    /* aaa\n       bbb\n  x */\n" "    /* aaa bbb\n  x */\n")
+                  ;; Glued text is kept, as in the longer layout (last case).
+                  (list 70 "/* aaa\n   bbb.*/\n" "/* aaa\n   bbb.*/\n")
+                  (list 70 "/* aaa\n   bbb\n   ccc.*/\n" "/* aaa bbb\n   ccc.*/\n")
+                  ;; Text beside the closer joins.
+                  (list 70 "/* aaa bbb\n   ccc */\n" "/* aaa bbb ccc */\n")
+                  (list 70 "/* aaa\n * bbb */\n" "/* aaa bbb */\n")
+                  (list
+                   20
+                   "/* aaa bbb ccc ddd eee fff\n * ggg */\n"
+                   "/* aaa bbb ccc ddd\n * eee fff ggg */\n")))
+          (let ((fill-column (nth 0 case)))
+            (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case))
+            (should-fill-selection (nth 1 case) 0 (nth 2 case))))
+        ;; Code before the opener widens the prefix, text must be wider to join.
+        ;; A selection leaves a comment after code alone, so only the cursor.
+        (let ((fill-column 70))
+          (should-fill-same-from-every-position
+           "x = 1; /* aaa\n   bbb */\n" 0 "x = 1; /* aaa\n   bbb */\n")
+          (should-fill-same-from-every-position
+           "x = 1; /* aaa\n   bbb ccc */\n" 0 "x = 1; /* aaa bbb ccc */\n"))))
+    ;; A closer alone, wider than the `|' prefix, was joined.
+    (with-temp-buffer
+      (pascal-mode)
+      (let ((inhibit-message t)
+            (fill-column 70))
+        (should-fill-same-from-every-position "(* aaa bbb\n *)\n" 0 "(* aaa bbb\n *)\n")))))
 
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-bare-separator-width ()
   "A bare ` *' separator line does not widen the paragraph above it.
