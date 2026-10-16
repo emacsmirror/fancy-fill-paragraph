@@ -1695,13 +1695,26 @@ fill taking it for a paragraph separator."
         (forward-line 1))
       prefixed)))
 
-(defun fancy-fill-paragraph--body-paragraph-bounds (body-beg body-end prefix-col sel-beg sel-end)
+(defsubst fancy-fill-paragraph--mark-run-regexp (mark)
+  "Return a regexp matching a line of MARK repeated, nothing else, or nil.
+MARK is a prefix's non-blank text (`*' of ` * ' for e.g.), such a line
+being a banner (` ****' for e.g.).  An empty MARK has no regexp."
+  (declare (important-return-value t))
+  (and (not (string-empty-p mark))
+       (concat "[ \t]*\\(?:" (regexp-quote mark) "\\)\\{2,\\}[ \t]*$")))
+
+(defun fancy-fill-paragraph--body-paragraph-bounds
+    (body-beg body-end prefix-col sel-beg sel-end &optional cont-prefix)
   "Return paragraph bounds in BODY-BEG..BODY-END overlapping SEL-BEG..SEL-END.
-Paragraphs are separated by lines blank after PREFIX-COL columns.
+Paragraphs are separated by lines blank after PREFIX-COL columns, and
+by lines of CONT-PREFIX's mark repeated, when non-nil, see
+`fancy-fill-paragraph--mark-run-regexp'.
 SEL-BEG and SEL-END are clamped to the body range so callers may pass
 a cursor position outside the body (e.g. on a delimiter line).
 Returns a list of (PARA-BEG . PARA-END) in reverse order so callers
-can fill later paragraphs first without invalidating earlier positions."
+can fill later paragraphs first without invalidating earlier positions.
+NOTE: a banner line has no text to fill, taken for text it was given
+the prefix (` * ****' for e.g.), so it's left as it is."
   (declare (important-return-value t))
   (save-excursion
     ;; A BODY-END past the buffer never reaches the last line's end, so the
@@ -1715,12 +1728,17 @@ can fill later paragraphs first without invalidating earlier positions."
     (let ((result nil)
           (para-beg nil)
           (para-end nil)
-          (done nil))
+          (done nil)
+          (mark-run-re (fancy-fill-paragraph--mark-run-regexp (string-trim (or cont-prefix "")))))
       (while (and (not done) (<= (point) body-end))
         (let ((separator-p
-               (save-excursion
-                 (move-to-column prefix-col)
-                 (looking-at-p "[ \t]*$"))))
+               (or (save-excursion
+                     (move-to-column prefix-col)
+                     (looking-at-p "[ \t]*$"))
+                   (and mark-run-re
+                        (save-excursion
+                          (goto-char (pos-bol))
+                          (looking-at-p mark-run-re))))))
           (cond
            (separator-p
             (when para-beg
@@ -1926,9 +1944,11 @@ Otherwise call INLINE-FN with no arguments."
     (funcall inline-fn))))
 
 (defun fancy-fill-paragraph--fill-body-paragraphs
-    (body-beg body-end prefix-col sel-beg sel-end para-fill-fn)
+    (body-beg body-end prefix-col sel-beg sel-end para-fill-fn &optional cont-prefix)
   "Fill paragraphs in BODY-BEG..BODY-END, calling PARA-FILL-FN for each.
 PREFIX-COL is the prefix width for paragraph-boundary detection.
+CONT-PREFIX, when non-nil, is the prefix whose mark separates
+paragraphs too, see `fancy-fill-paragraph--body-paragraph-bounds'.
 SEL-BEG and SEL-END restrict filling to overlapping paragraphs.
 PARA-FILL-FN is called as (PARA-FILL-FN PARA-BEG PARA-END) and should
 return non-nil when the buffer was modified.
@@ -1937,7 +1957,8 @@ Returns non-nil when any paragraph changed."
   (let ((changed nil))
     (dolist (para
              (fancy-fill-paragraph--body-paragraph-bounds
-              body-beg body-end prefix-col sel-beg sel-end))
+              body-beg body-end prefix-col sel-beg sel-end
+              cont-prefix))
       (when (funcall para-fill-fn (car para) (cdr para))
         (setq changed t)))
     changed))
@@ -2066,21 +2087,24 @@ Returns non-nil when the buffer was modified."
             (car inner-body))))
          (scan-end (or closer-line-end (cdr inner-body))))
     (fancy-fill-paragraph--fill-body-paragraphs
-     scan-beg scan-end prefix-col sel-beg sel-end
+     scan-beg
+     scan-end
+     prefix-col
+     sel-beg
+     sel-end
      (lambda (para-beg para-end)
-       (let ((para-closer (and closer-line-end (= para-end scan-end) closer)))
+       (let ((para-closer
+              (and closer-line-end (= para-end scan-end) closer)))
          (cond
           ;; First paragraph includes the opener line: merge opener
           ;; text with body lines using the opener prefix for line 1.
           ((and opener-text (= para-beg beg))
-           (fancy-fill-paragraph--fill-prefixed-region (car inner-body) para-end cont-prefix
-                                                       opener-prefix
-                                                       opener-text
-                                                       beg
-                                                       nil
-                                                       para-closer))
+           (fancy-fill-paragraph--fill-prefixed-region
+            (car inner-body) para-end cont-prefix
+            opener-prefix opener-text beg nil para-closer))
           (t
-           (funcall para-fill-fn para-beg para-end para-closer))))))))
+           (funcall para-fill-fn para-beg para-end para-closer)))))
+     cont-prefix)))
 
 (defun fancy-fill-paragraph--fill-block-comment-body
     (body-beg body-end cont-prefix &optional closer)

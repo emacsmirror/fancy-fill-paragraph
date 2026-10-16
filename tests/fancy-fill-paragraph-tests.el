@@ -5601,6 +5601,71 @@ fill took for a paragraph separator."
             (dotimes (line-index (length (split-string (nth 1 case) "\n" t)))
               (should-fill-same-from-every-position (nth 1 case) line-index (nth 2 case)))))))))
 
+(ert-deftest fill-syntax-bounds-block-comment-banner-line-separates ()
+  "A line of the prefix's mark alone separates paragraphs, it's left as it is.
+A banner line (` ****' for e.g.) was taken for text in a paragraph with
+the prefix, so it was given the prefix (` * ****').  The last cases are
+preservation cases, text after marks is still text, and a string has no
+mark to repeat."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  ;; Found in practice (`png.h').
+                  (list
+                   79 (list 1 2)
+                   (concat
+                    "/*****************************************************************\n"
+                    " * Section 5: SIMPLIFIED API\n"
+                    " *****************************************************************\n"
+                    " *\n"
+                    " * Please read the documentation.\n"
+                    " */\n")
+                   (concat
+                    "/*****************************************************************\n"
+                    " * Section 5: SIMPLIFIED API\n"
+                    " *****************************************************************\n"
+                    " *\n"
+                    " * Please read the documentation.\n"
+                    " */\n"))
+                  ;; The paragraphs on either side fill on their own.
+                  (list
+                   20
+                   (list 1)
+                   "/*\n * aaa bbb ccc ddd eee\n ******\n * fff\n * ggg */\n"
+                   "/*\n * aaa bbb ccc ddd\n * eee\n ******\n * fff\n * ggg */\n")
+                  (list
+                   20
+                   (list 3 4)
+                   "/*\n * aaa bbb ccc ddd eee\n ******\n * fff\n * ggg */\n"
+                   "/*\n * aaa bbb ccc ddd eee\n ******\n * fff ggg */\n")
+                  ;; Preservation.
+                  (list
+                   40
+                   (list 1)
+                   "/*\n * aaa bbb\n **bold** ccc\n */\n"
+                   "/*\n * aaa bbb **bold** ccc\n */\n")))
+          (let ((fill-column (nth 0 case)))
+            (dolist (line-index (nth 1 case))
+              (should-fill-same-from-every-position (nth 2 case) line-index (nth 3 case)))))
+        ;; A selection fills the paragraphs on either side, the banner kept.
+        (let ((fill-column 20))
+          (should-fill-selection
+           "/*\n * aaa bbb ccc ddd eee\n ******\n * fff\n * ggg */\n"
+           0
+           "/*\n * aaa bbb ccc ddd\n * eee\n ******\n * fff ggg */\n"))))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t)
+            (fill-column 30))
+        (should-fill-same-from-every-position
+         "def f():\n    \"\"\"Aaa.\n\n    bbb ccc\n    ****\n    ddd\n    \"\"\"\n"
+         3
+         "def f():\n    \"\"\"Aaa.\n\n    bbb ccc **** ddd\n    \"\"\"\n")))))
+
 (ert-deftest fill-syntax-bounds-block-comment-misaligned-prefix-stripped ()
   "A line whose prefix is a column off in a paragraph with the prefix loses it.
 Only its blank-space was stripped, its mark taken for text, then for a
