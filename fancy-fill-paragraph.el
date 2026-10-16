@@ -2055,7 +2055,8 @@ the doc-string.  Otherwise the closer may be less indented than the text
      sel-end
      &optional
      closer-line-end
-     closer)
+     closer
+     para-keep-fn)
   "Fill paragraphs in a multi-line syntax region, merging opener text.
 BEG is `pos-bol' of the opener line.  INNER-BODY is (BODY-BEG . BODY-END)
 for the lines between opener and closer.  CONT-PREFIX is the continuation
@@ -2071,6 +2072,8 @@ CLOSER-LINE-END, when non-nil, is the end of a closer line carrying
 text, which then joins the last paragraph.  CLOSER, when non-nil, is
 the closer as a word of its own, held out of the last paragraph's fill,
 see `fancy-fill-paragraph--closer-word'.
+PARA-KEEP-FN, when non-nil, is called as (PARA-KEEP-FN PARA-BEG PARA-END)
+for each paragraph, which is left as it is when it returns non-nil.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
   (let* ((prefix-col (fancy-fill-paragraph--prefix-column-width (car inner-body) cont-prefix))
@@ -2096,6 +2099,8 @@ Returns non-nil when the buffer was modified."
        (let ((para-closer
               (and closer-line-end (= para-end scan-end) closer)))
          (cond
+          ((and para-keep-fn (funcall para-keep-fn para-beg para-end))
+           nil)
           ;; First paragraph includes the opener line: merge opener
           ;; text with body lines using the opener prefix for line 1.
           ((and opener-text (= para-beg beg))
@@ -2389,6 +2394,23 @@ The plist contains:
         (skip-chars-forward " \t" (pos-eol))
         (append (fancy-fill-paragraph--opener-prefix-and-text) (list :repeated repeated)))))))
 
+(defun fancy-fill-paragraph--string-escaped-newline-p (beg end)
+  "Return non-nil when a newline in the string BEG..END is escaped.
+An escape is read from the syntax table, so a newline after an escaped
+escape (`\\\\' for e.g.) isn't counted.
+NOTE: only a newline after a character with escape or character quote
+syntax can be escaped, so only those newlines are checked with
+`syntax-ppss', rather than every newline of the string."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char beg)
+    (let ((found nil))
+      (while (and (null found) (re-search-forward "\\(?:\\s\\\\|\\s/\\)\n" end t))
+        ;; NOTE: `syntax-ppss' may move point (in `python-mode' for e.g.),
+        ;; finding the same newline again, so point is kept.
+        (setq found (save-excursion (nth 5 (syntax-ppss (1- (point)))))))
+      found)))
+
 (defun fancy-fill-paragraph--fill-string-region (beg end opener-pos &optional sel-beg sel-end)
   "Fill a string in the region BEG..END.
 OPENER-POS is the buffer position where the string sexp begins.
@@ -2400,9 +2422,10 @@ delimiters), fills the entire region, treating the delimiters as part
 of the text.  Either way a closer on a line of its own stays there,
 while text on the closer line joins the last paragraph.  A string on
 one line is only filled when its delimiter is repeated, otherwise it's
-left as it is.  Without a line between the opener and closer lines,
-code before the opener is kept on the first line, later lines
-continuing at the second line's indentation."
+left as it is, as is a paragraph continued with an escaped newline.
+Without a line between the opener and closer lines, code before the
+opener is kept on the first line, later lines continuing at the second
+line's indentation."
   (let* ((inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
          (opener-info (fancy-fill-paragraph--string-opener-info opener-pos))
          (closer-end (fancy-fill-paragraph--string-end opener-pos))
@@ -2427,7 +2450,16 @@ continuing at the second line's indentation."
         (or sel-beg (point))
         (or sel-end (point))
         (and (eq closer-kind 'joins) end)
-        closer))
+        closer
+        ;; NOTE: a paragraph continued with an escaped newline can't have
+        ;; its lines broken or joined without changing the string, a raw
+        ;; newline is an error in C and Python and a joined escape is
+        ;; another character.  Other paragraphs are filled.  The newline
+        ;; ending it is checked too, as the line after it may be left out
+        ;; of the fill (a closer line with code after it for e.g.).
+        (lambda (para-beg para-end)
+          (fancy-fill-paragraph--string-escaped-newline-p
+           para-beg (min (1+ para-end) (point-max))))))
      (lambda ()
        (cond
         ;; NOTE: only a repeated delimiter shows a string on one line may
@@ -2438,6 +2470,9 @@ continuing at the second line's indentation."
         ((and (null closer-bol) (not (plist-get opener-info :repeated)))
          nil)
         ((eq closer-kind 'blocked)
+         nil)
+        ;; Keep an escaped newline, as for the body's paragraphs above.
+        ((fancy-fill-paragraph--string-escaped-newline-p beg (min (1+ end) (point-max)))
          nil)
         ;; NOTE: code before the opener is kept with it as the first line's
         ;; prefix, filled as prose it was reflowed with the text, an error in

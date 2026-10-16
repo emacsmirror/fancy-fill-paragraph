@@ -4843,6 +4843,106 @@ the body fills as it does without one."
         (should-fill-same-from-every-position text-initial-defvar 1 text-expected-defvar)
         (should-fill-same-from-every-position text-initial-defvar 3 text-expected-defvar-body)))))
 
+(ert-deftest fill-syntax-bounds-string-escaped-newline-unchanged ()
+  "A string continued with an escaped newline is left as it is.
+Its lines can't be broken or joined without changing the string, a raw
+newline is an error in C and Python, a joined escape is another
+character.
+A newline after an escaped backslash isn't escaped, nor is a newline
+after another escape, both fill as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30))
+    (dolist (case
+             (list
+              (list
+               #'c-mode
+               "s = \"aaa bbb ccc ddd eee fff ggg \\\nhhh\";\n"
+               "s = \"aaa bbb ccc ddd eee fff ggg \\\nhhh\";\n")
+              (list
+               #'c-mode
+               "s = \"aaa bbb ccc ddd eee fff ggg \\\nhhh \\\niii\";\n"
+               "s = \"aaa bbb ccc ddd eee fff ggg \\\nhhh \\\niii\";\n")
+              (list
+               #'python-mode
+               "x = \"aaa bbb ccc ddd eee fff ggg \\\nhhh\" + y\n"
+               "x = \"aaa bbb ccc ddd eee fff ggg \\\nhhh\" + y\n")
+              (list
+               #'python-mode
+               "x = \"aaa bbb ccc ddd eee fff ggg \\\nhhh\"\n"
+               "x = \"aaa bbb ccc ddd eee fff ggg \\\nhhh\"\n")
+              ;; Preservation: no escaped newline.
+              (list
+               #'python-mode
+               "x = \"\"\"aaa bbb ccc ddd eee fff ggg \\\\\nhhh\"\"\"\n"
+               "x = \"\"\"aaa bbb ccc ddd eee fff\nggg \\\\ hhh\"\"\"\n")
+              (list
+               #'python-mode
+               "x = \"\"\"aaa bbb\\n ccc ddd eee fff ggg\nhhh\"\"\"\n"
+               "x = \"\"\"aaa bbb\\n ccc ddd eee\nfff ggg hhh\"\"\"\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case)))))))
+
+(ert-deftest fill-syntax-bounds-string-escaped-newline-other-paragraphs-fill ()
+  "Paragraphs of a string without an escaped newline fill as before.
+An escaped newline anywhere left the whole string as it was, an Emacs
+Lisp doc-string opening with `\"\\' or a Python doc-string with an
+example continued across lines for e.g.
+The paragraph holding the escaped newline is still left as it is."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40))
+    (dolist (case
+             (let ((elisp-text
+                    (concat
+                     "(defun foo ()\n"
+                     "  \"\\\n"
+                     "Summary line.\n"
+                     "\n"
+                     "Aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp.\"\n"
+                     "  nil)\n"))
+                   (python-text
+                    (concat
+                     "def f():\n"
+                     "    \"\"\"Summary.\n"
+                     "\n"
+                     "    Aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll.\n"
+                     "\n"
+                     "    Example: x = 1 + \\\n"
+                     "    2\n"
+                     "    \"\"\"\n")))
+               (list
+                (list
+                 #'emacs-lisp-mode elisp-text 4
+                 (concat
+                  "(defun foo ()\n"
+                  "  \"\\\n"
+                  "Summary line.\n"
+                  "\n"
+                  "Aaa bbb ccc ddd eee fff ggg hhh iii jjj\n"
+                  "kkk lll mmm nnn ooo ppp.\"\n"
+                  "  nil)\n"))
+                (list
+                 #'python-mode python-text 3
+                 (concat
+                  "def f():\n"
+                  "    \"\"\"Summary.\n"
+                  "\n"
+                  "    Aaa bbb ccc ddd eee fff ggg hhh iii\n"
+                  "    jjj kkk lll.\n"
+                  "\n"
+                  "    Example: x = 1 + \\\n"
+                  "    2\n"
+                  "    \"\"\"\n"))
+                ;; Preservation: the paragraph holding the escaped newline.
+                (list #'emacs-lisp-mode elisp-text 2 elisp-text)
+                (list #'python-mode python-text 5 python-text)
+                (list #'python-mode python-text 6 python-text))))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) (nth 2 case) (nth 3 case)))))))
+
 (ert-deftest fill-syntax-bounds-string-one-line-unchanged ()
   "A string on one line is left as it is, unless its delimiter is repeated.
 It was filled as prose, breaking it across lines, an error in Python
