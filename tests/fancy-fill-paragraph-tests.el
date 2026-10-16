@@ -606,21 +606,39 @@ quotes beside the one with string syntax reading as empty strings, as
 
 (ert-deftest fill-syntax-bounds-data-mode-keys-beside-strings-untouched ()
   "Keys beside a quoted value are never merged in a data mode.
-Only programming modes took the text beside a string for code, so a
-mode derived from `text-mode' (`yaml-ts-mode' for e.g.) filled the
-whole paragraph as prose, merging its keys."
+Only programming and configuration modes took the text beside a string
+for code, so a mode derived from `text-mode' (`yaml-ts-mode' for e.g.)
+or `bibtex-mode' filled the whole paragraph as prose, merging its keys.
+A string fills alone, as in a programming mode."
   (let ((fancy-fill-paragraph-syntax-bounds t)
-        (fill-column 20)
         (sentence-end-double-space nil))
-    (with-temp-buffer
-      (fancy-fill-paragraph-test-data-mode)
-      (let ((inhibit-message t))
-        (let ((text "a: 1\nkey: \"aaa\"\nb: 2\n"))
-          (dotimes (line-index 3)
-            (should-fill-same-from-every-position text line-index text))
-          (should-fill-selection text 0 text))
-        (let ((text "a: 1\nkey: \"aaa bbb ccc ddd eee fff ggg\n  hhh iii\"\n"))
-          (should-fill-same-from-every-position text 0 text))))))
+    (dolist (case
+             (list
+              (list
+               #'fancy-fill-paragraph-test-data-mode
+               20
+               1
+               "a: 1\nkey: \"aaa bbb ccc ddd eee fff ggg\n  hhh iii\"\n"
+               "a: 1\nkey: \"aaa bbb ccc\n  ddd eee fff ggg\n  hhh iii\"\n")
+              (list
+               #'fancy-fill-paragraph-test-data-mode
+               20
+               0
+               "a: 1\nkey: \"aaa bbb ccc ddd eee fff ggg\n  hhh iii\"\n"
+               "a: 1\nkey: \"aaa bbb ccc ddd eee fff ggg\n  hhh iii\"\n")
+              (list
+               #'bibtex-mode 30 1
+               (concat
+                "@article{x,\n  title = \"aaa bbb ccc ddd eee fff ggg\n    hhh iii\",\n"
+                "  year = 2020\n}\n")
+               (concat
+                "@article{x,\n  title = \"aaa bbb ccc ddd eee\n    fff ggg hhh iii\",\n"
+                "  year = 2020\n}\n"))))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column (nth 1 case)))
+          (should-fill-same-from-every-position (nth 3 case) (nth 2 case) (nth 4 case)))))))
 
 (ert-deftest fill-syntax-bounds-conf-mode-keys-beside-strings-untouched ()
   "Keys and section headers beside a quoted value are never merged.
@@ -4976,6 +4994,175 @@ fills."
         (should-fill-same-from-every-position
          text-initial-js-bare 2 text-expected-js-bare-body)))))
 
+(ert-deftest fill-syntax-bounds-string-one-line-code-before-opener-untouched ()
+  "Code before a string on one line is left as it is, the string's text wraps.
+The line was filled as prose, reflowing the code with the text, an
+error in Python.  A tab before the opener was measured as one column, so
+the text wrapped short.  Later lines continue at the line's indentation,
+the last cases are preservation cases."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               0
+               "result_value = prefix_string + \"\"\"aaa bbb\"\"\"\n"
+               "result_value = prefix_string + \"\"\"aaa\nbbb\"\"\"\n")
+              (list
+               0
+               "value = compute(1, 2) + \"\"\"aaa bbb ccc\"\"\"\n"
+               "value = compute(1, 2) + \"\"\"aaa\nbbb ccc\"\"\"\n")
+              (list
+               0
+               "x =\t\"\"\"aaa bbb ccc ddd eee fff ggg hhh\"\"\"\n"
+               "x =\t\"\"\"aaa bbb ccc ddd eee\nfff ggg hhh\"\"\"\n")
+              ;; Preservation.
+              (list
+               0
+               "    x = - \"\"\"aaa bbb ccc ddd eee fff ggg hhh\"\"\"\n"
+               "    x = - \"\"\"aaa bbb ccc ddd\n    eee fff ggg hhh\"\"\"\n")
+              (list
+               1
+               "def f():\n    \"\"\"Aaa bbb ccc ddd eee fff ggg hhh.\"\"\"\n    pass\n"
+               "def f():\n    \"\"\"Aaa bbb ccc ddd eee fff\n    ggg hhh.\"\"\"\n    pass\n")))
+      (with-temp-buffer
+        (python-mode)
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) (nth 0 case) (nth 2 case)))))))
+
+(ert-deftest fill-syntax-bounds-two-line-string-continues-at-second-line-indent ()
+  "A string on two lines, text on both, wraps at its second line's indentation.
+The opener line was grouped apart by its indentation, so its wrapped
+text took the opener's indentation and the second line was not joined.
+Two-line strings whose lines share an indentation fill as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 40)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'emacs-lisp-mode
+               (concat
+                "(defun f ()\n"
+                "  \"Aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n"
+                "mmm.\"\n"
+                "  nil)\n")
+               (concat
+                "(defun f ()\n"
+                "  \"Aaa bbb ccc ddd eee fff ggg hhh iii\n"
+                "jjj kkk lll mmm.\"\n"
+                "  nil)\n"))
+              (list
+               #'python-mode
+               (concat
+                "def f():\n"
+                "    x = \"\"\"aaa bbb ccc ddd eee fff ggg hhh iii\n"
+                "    jjj kkk.\"\"\"\n")
+               (concat
+                "def f():\n"
+                "    x = \"\"\"aaa bbb ccc ddd eee fff ggg\n"
+                "    hhh iii jjj kkk.\"\"\"\n"))
+              (list
+               #'org-mode
+               (concat "\"Aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n" "mmm.\"\n")
+               (concat "\"Aaa bbb ccc ddd eee fff ggg hhh iii jjj\n" "kkk lll mmm.\"\n"))))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (buffer-reset-text (nth 1 case))
+          (goto-char (point-min))
+          (search-forward "aa" nil nil)
+          (should (fancy-fill-paragraph))
+          (should (equal (nth 2 case) (buffer-string))))))))
+
+(ert-deftest fill-syntax-bounds-python-docstring-opener-dot-point-continuation ()
+  "A dot-point on the opener line keeps the line continuing it as its own.
+A string on two lines, the second hangs past the marker, its
+indentation was taken for the continuation, so the fill hung it again.
+The last cases are preservation cases, a dot-point or text at the
+opener line's indentation is not taken to hang."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist
+        (case
+         (list
+          (list
+           "    \"\"\"- aaa bbb ccc ddd eee fff\n      ggg hhh iii jjjjjj \"\"\"\n"
+           "    \"\"\"- aaa bbb ccc ddd eee\n      fff ggg hhh iii jjjjjj\n    \"\"\"\n")
+          (list
+           "    \"\"\"1. aaa bbb ccc ddd eee fff\n       ggg hhh iii jjjjjj \"\"\"\n"
+           "    \"\"\"1. aaa bbb ccc ddd eee\n       fff ggg hhh iii jjjjjj\n    \"\"\"\n")
+          ;; Preservation.
+          (list
+           "    \"\"\"- aaa bbb ccc ddd eee fff\n      ggg hhh iii jjjjjj\n    - kkk\n    \"\"\"\n"
+           "    \"\"\"- aaa bbb ccc ddd eee\n      fff ggg hhh iii jjjjjj\n    - kkk\n    \"\"\"\n")
+          (list
+           "    \"\"\"- aaa bbb ccc ddd eee fff\n    ggg hhh iii jjjjjj\n    \"\"\"\n"
+           "    \"\"\"- aaa bbb ccc ddd eee\n      fff\n    ggg hhh iii jjjjjj\n    \"\"\"\n")))
+      (with-temp-buffer
+        (python-mode)
+        (let ((inhibit-message t))
+          (dotimes (line-index 2)
+            (should-fill-same-from-every-position (nth 0 case) line-index (nth 1 case))))))))
+
+(ert-deftest fill-syntax-bounds-two-line-region-fills-as-longer ()
+  "A string on two lines fills as a longer one of the same shape.
+Each case is followed by its longer form for contrast.  A string's
+closer alone on its line took the prose fill, continuing at the opener
+line's indentation, after code it broke the line before the opener.  It
+now continues at the closer's indentation, as with a line between them."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 20)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              ;; A string's closer alone.
+              (list
+               #'python-mode
+               '(1 2)
+               nil
+               "def f():\n    \"\"\"aaa bbb ccc ddd eee fff\n\"\"\"\n"
+               "def f():\n    \"\"\"aaa bbb ccc\nddd eee fff\n\"\"\"\n")
+              (list
+               #'python-mode
+               '(1)
+               nil
+               "def f():\n    \"\"\"aaa bbb ccc ddd eee fff\n\n\"\"\"\n"
+               "def f():\n    \"\"\"aaa bbb ccc\nddd eee fff\n\n\"\"\"\n")
+              (list
+               #'python-mode
+               '(0 1)
+               nil
+               "x = 1 + \"\"\"aaa bbb ccc ddd eee\n    \"\"\"\n"
+               "x = 1 + \"\"\"aaa bbb\n    ccc ddd eee\n    \"\"\"\n")
+              (list
+               #'python-mode
+               '(0)
+               nil
+               "x = 1 + \"\"\"aaa bbb ccc ddd eee\n\n    \"\"\"\n"
+               "x = 1 + \"\"\"aaa bbb\n    ccc ddd eee\n\n    \"\"\"\n")
+              (list
+               #'emacs-lisp-mode
+               '(1 2)
+               nil
+               "(defun f ()\n  \"aaa bbb ccc ddd eee fff ggg hhh\n\"\n  nil)\n"
+               "(defun f ()\n  \"aaa bbb ccc ddd\neee fff ggg hhh\n\"\n  nil)\n")
+              (list
+               #'emacs-lisp-mode
+               '(1)
+               nil
+               "(defun f ()\n  \"aaa bbb ccc ddd eee fff ggg hhh\n\n\"\n  nil)\n"
+               "(defun f ()\n  \"aaa bbb ccc ddd\neee fff ggg hhh\n\n\"\n  nil)\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (dolist (line-index (nth 1 case))
+            (should-fill-same-from-every-position (nth 3 case) line-index (nth 4 case)))
+          (when (nth 2 case)
+            (should-fill-selection (nth 3 case) 0 (nth 4 case))))))))
+
 (ert-deftest fill-syntax-bounds-closer-before-closing-delimiters-fills ()
   "A closer followed by closing delimiters fills as one followed by nothing.
 Any text after the closer was taken for code, so a closer line ending
@@ -4996,6 +5183,11 @@ line."
                3
                "(defvar foo nil\n  \"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii jjj kkk.\")\n"
                "(defvar foo nil\n  \"Aaa bbb.\n\nccc ddd eee fff ggg hhh iii\njjj kkk.\")\n")
+              (list
+               #'emacs-lisp-mode
+               2
+               "(defvar foo nil\n  \"Aaa bbb.\nccc ddd eee fff ggg hhh iii jjj kkk.\")\n"
+               "(defvar foo nil\n  \"Aaa bbb. ccc ddd eee fff\nggg hhh iii jjj kkk.\")\n")
               (list
                #'python-mode
                2
@@ -5889,6 +6081,12 @@ drops the prefix's mark."
                0
                "/* - aaa bbb ccc ddd eee fff ggg hhh iii jjjjjjjjjjj */\n"
                "/* - aaa bbb ccc ddd eee fff\n *   ggg hhh iii jjjjjjjjjjj\n */\n")
+              ;; A string on one line, its opener's line filled as a longer string's is.
+              (list
+               #'python-mode
+               0
+               "    \"\"\"- aaa bbb ccc ddd eee fff ggg hhh iii jjjjjj \"\"\"\n"
+               "    \"\"\"- aaa bbb ccc ddd eee\n      fff ggg hhh iii jjjjjj\n    \"\"\"\n")
               (list
                #'python-mode
                0

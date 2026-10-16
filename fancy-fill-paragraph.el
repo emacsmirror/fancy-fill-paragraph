@@ -2400,7 +2400,9 @@ delimiters), fills the entire region, treating the delimiters as part
 of the text.  Either way a closer on a line of its own stays there,
 while text on the closer line joins the last paragraph.  A string on
 one line is only filled when its delimiter is repeated, otherwise it's
-left as it is."
+left as it is.  Without a line between the opener and closer lines,
+code before the opener is kept on the first line, later lines
+continuing at the second line's indentation."
   (let* ((inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
          (opener-info (fancy-fill-paragraph--string-opener-info opener-pos))
          (closer-end (fancy-fill-paragraph--string-end opener-pos))
@@ -2437,6 +2439,70 @@ left as it is."
          nil)
         ((eq closer-kind 'blocked)
          nil)
+        ;; NOTE: code before the opener is kept with it as the first line's
+        ;; prefix, filled as prose it was reflowed with the text, an error in
+        ;; Python.  Later lines continue at the second line's indentation,
+        ;; the closer's when it's alone there, on one line at the opener
+        ;; line's, the string has no other line to take it from.
+        ((plist-get opener-info :text)
+         (let* ((opener-prefix (plist-get opener-info :prefix))
+                (opener-indent (fancy-fill-paragraph--leading-indent-string opener-prefix))
+                (indent
+                 (cond
+                  (closer-bol
+                   (save-excursion
+                     (goto-char closer-bol)
+                     (buffer-substring-no-properties
+                      (point)
+                      (progn
+                        (skip-chars-forward " \t" (pos-eol))
+                        (point)))))
+                  (t
+                   opener-indent)))
+                ;; The second line of a dot-point hangs past its marker, the
+                ;; fill hangs it again, so the marker's width is taken off,
+                ;; unless the line is under the marker.
+                (opener-hang
+                 (let ((dp-match
+                        (fancy-fill-paragraph--line-dot-point-match
+                         (plist-get opener-info :text)
+                         (fancy-fill-paragraph--compile-dot-point-patterns))))
+                   (and dp-match (string-width (cdr dp-match)))))
+                (indent
+                 (cond
+                  ((and closer-bol
+                        (eq closer-kind 'joins)
+                        opener-hang
+                        (string-suffix-p (make-string opener-hang ?\s) indent)
+                        (<= (+ (fancy-fill-paragraph--string-column-width opener-indent)
+                               opener-hang)
+                            (fancy-fill-paragraph--string-column-width indent)))
+                   (substring indent 0 (- opener-hang)))
+                  (t
+                   indent)))
+                ;; The second line is stripped of the indentation alone, a
+                ;; dot-point's hang past it is kept for the fill.
+                (lines
+                 (cons
+                  (plist-get opener-info :text)
+                  (and closer-bol
+                       (eq closer-kind 'joins)
+                       (list
+                        (save-excursion
+                          (goto-char closer-bol)
+                          (move-to-column (fancy-fill-paragraph--string-column-width indent))
+                          (buffer-substring-no-properties (point) (pos-eol))))))))
+           (fancy-fill-paragraph--fill-prefixed-paragraph
+            lines beg
+            (cond
+             ((eq closer-kind 'alone)
+              (1- closer-bol))
+             (t
+              end))
+            indent
+            opener-prefix
+            (fancy-fill-paragraph--string-column-width indent)
+            closer)))
         ((eq closer-kind 'alone)
          (fancy-fill-paragraph--fill-region beg (1- closer-bol)))
         (t
