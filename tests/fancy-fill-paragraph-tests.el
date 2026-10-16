@@ -8537,6 +8537,77 @@ style c from either character of a two-character opener."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-regexp-dot-point-empty-match-not-a-dot-point ()
+  "A dot-point pattern matching nothing on a line takes it for no dot-point.
+Every line was taken for one, filling recursed until it failed, and a
+doc-string's lines lost their indentation, an empty marker taken off it.
+A word the pattern does match (`22' for e.g.) is still kept from
+starting a line.  An empty literal pattern is the same."
+  (let ((fill-column 30)
+        (sentence-end-double-space nil)
+        (fancy-fill-paragraph-syntax-bounds t)
+        (fancy-fill-paragraph-dot-point-prefix (list '(:regexp . "[0-9]*\\.? ?"))))
+    (with-fancy-fill-paragraph-test "1. aaa bbb ccc ddd eee fff ggg hhh iii jjj\n2. kkk lll\n"
+      (goto-char (point-min))
+      (fancy-fill-paragraph)
+      (should
+       (equal "1. aaa bbb ccc ddd eee fff ggg\n   hhh iii jjj\n2. kkk lll\n" (buffer-string))))
+    (with-temp-buffer
+      (python-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position
+         "    \"\"\"Aaa bbb ccc ddd eee fff ggg\n    hhh iii jjj kkk lll.\n    \"\"\"\n"
+         0
+         "    \"\"\"Aaa bbb ccc ddd eee fff\n    ggg hhh iii jjj kkk lll.\n    \"\"\"\n"))))
+  (let ((fill-column 12)
+        (sentence-end-double-space nil)
+        (fancy-fill-paragraph-dot-point-prefix (list '(:regexp . "[0-9]*\\.? ?"))))
+    (with-fancy-fill-paragraph-test "aaa bbb ccc 22 ddd eee\n"
+      (goto-char (point-min))
+      (fancy-fill-paragraph)
+      (should (equal "aaa bbb\nccc 22 ddd\neee\n" (buffer-string)))))
+  (let ((fill-column 30)
+        (sentence-end-double-space nil)
+        (fancy-fill-paragraph-dot-point-prefix (list "")))
+    (with-fancy-fill-paragraph-test "aaa bbb ccc ddd eee fff ggg hhh iii jjj\nkkk lll\n"
+      (goto-char (point-min))
+      (fancy-fill-paragraph)
+      (should (equal "aaa bbb ccc ddd eee fff ggg\nhhh iii jjj kkk lll\n" (buffer-string))))))
+
+(ert-deftest fill-dot-point-non-empty-match-unchanged ()
+  "A dot-point pattern's non-empty match is still a dot-point.
+The default patterns hang each item's text under its marker, and a
+word a pattern matches (`22' for e.g.) is kept from starting a line."
+  (let ((fill-column 20)
+        (sentence-end-double-space nil)
+        (fancy-fill-paragraph-dot-point-prefix (list "- " "* " '(:regexp . "[0-9]+\\. "))))
+    (with-fancy-fill-paragraph-test
+        "- aaa bbb ccc ddd eee fff ggg\n* hhh iii jjj kkk lll mmm\n10. nnn ooo ppp qqq rrr\n"
+      (goto-char (point-min))
+      (fancy-fill-paragraph)
+      (should
+       (equal
+        (concat
+         "- aaa bbb ccc ddd\n"
+         "  eee fff ggg\n"
+         "* hhh iii jjj kkk\n"
+         "  lll mmm\n"
+         "10. nnn ooo ppp qqq\n"
+         "    rrr\n")
+        (buffer-string)))))
+  (let ((fill-column 12)
+        (sentence-end-double-space nil))
+    (let ((fancy-fill-paragraph-dot-point-prefix nil))
+      (with-fancy-fill-paragraph-test "aaa bbb ccc 22 ddd eee\n"
+        (goto-char (point-min))
+        (fancy-fill-paragraph)
+        (should (equal "aaa bbb ccc\n22 ddd eee\n" (buffer-string)))))
+    (let ((fancy-fill-paragraph-dot-point-prefix (list '(:regexp . "[0-9]+ "))))
+      (with-fancy-fill-paragraph-test "aaa bbb ccc 22 ddd eee\n"
+        (goto-char (point-min))
+        (fancy-fill-paragraph)
+        (should (equal "aaa bbb\nccc 22 ddd\neee\n" (buffer-string)))))))
+
 (ert-deftest fill-syntax-bounds-c-mode-block-comment-isolate-first-paragraph ()
   "Cursor in first paragraph should not fill the second paragraph."
   (let ((fill-column 60)

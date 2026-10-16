@@ -3017,7 +3017,10 @@ so line detection and false-dot-point prevention share one definition."
   "Check if LINE matches a dot-point prefix using compiled DOT-POINTS.
 DOT-POINTS is from `fancy-fill-paragraph--compile-dot-point-patterns'.
 Returns (INDENT-WIDTH . DP-PREFIX-STRING) or nil.
-INDENT-WIDTH is the number of leading blank-space characters."
+INDENT-WIDTH is the number of leading blank-space characters.
+An empty match is no dot-point, a pattern that can match nothing (an
+empty string or a user's `[0-9]*' for e.g.) would otherwise take every
+line for one."
   (declare (important-return-value t))
   (let ((result nil)
         (entries-remaining dot-points))
@@ -3028,18 +3031,23 @@ INDENT-WIDTH is the number of leading blank-space characters."
           ;; Literal: check leading blank-space then prefix.
           (let* ((prefix (plist-get entry :line-value))
                  (indent (fancy-fill-paragraph--leading-indent line)))
-            (when (eq t (compare-strings prefix 0 nil line indent (+ indent (length prefix))))
+            (when (and (< 0 (length prefix))
+                       (eq
+                        t (compare-strings prefix 0 nil line indent (+ indent (length prefix)))))
               (setq result (cons indent prefix)))))
          (t
           ;; Regexp: match and extract prefix from group 2.
-          (when (string-match (plist-get entry :line-value) line)
+          (when (and (string-match (plist-get entry :line-value) line)
+                     (< (match-beginning 2) (match-end 2)))
             (setq result (cons (- (match-end 1) (match-beginning 1)) (match-string 2 line)))))))
       (setq entries-remaining (cdr entries-remaining)))
     result))
 
 (defun fancy-fill-paragraph--dot-point-item-prefix-p (item dot-points)
   "Return non-nil when ITEM would look like a dot-point start.
-DOT-POINTS is from `fancy-fill-paragraph--compile-dot-point-patterns'."
+DOT-POINTS is from `fancy-fill-paragraph--compile-dot-point-patterns'.
+An empty match is no dot-point, see
+`fancy-fill-paragraph--line-dot-point-match'."
   (declare (important-return-value t))
   (let ((item-with-space (concat item " "))
         (result nil)
@@ -3049,9 +3057,11 @@ DOT-POINTS is from `fancy-fill-paragraph--compile-dot-point-patterns'."
         (setq result
               (cond
                ((eq (plist-get entry :item-type) 'literal)
-                (string-prefix-p (plist-get entry :item-value) item-with-space))
+                (let ((prefix (plist-get entry :item-value)))
+                  (and (< 0 (length prefix)) (string-prefix-p prefix item-with-space))))
                (t
-                (string-match-p (plist-get entry :item-value) item-with-space)))))
+                (and (string-match (plist-get entry :item-value) item-with-space)
+                     (< 0 (match-end 0)))))))
       (setq entries-remaining (cdr entries-remaining)))
     result))
 
