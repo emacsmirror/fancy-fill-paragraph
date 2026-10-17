@@ -7994,6 +7994,112 @@ The closer line holds code, so it stays out of the paragraph."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-string-opener-one-word-fills ()
+  "A two-line string with one word glued to its opener fills.
+The opener and the word were read as a delimiter alone,
+so the string was taken as empty and left unfilled.
+Strings with a bare opener or other text fill as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (dolist
+        (case
+         (list
+          (list
+           #'python-mode
+           70
+           "def f():\n    \"\"\"Summary.\n    More text here aaa bbb ccc ddd.\"\"\"\n"
+           '(1 2)
+           "def f():\n    \"\"\"Summary. More text here aaa bbb ccc ddd.\"\"\"\n")
+          (list
+           #'python-mode
+           20
+           "def f():\n    \"\"\"Summary.\n    More text here aaa bbb ccc ddd.\"\"\"\n"
+           '(1 2)
+           "def f():\n    \"\"\"Summary. More\n    text here aaa\n    bbb ccc ddd.\"\"\"\n")
+          (list
+           #'python-mode
+           20
+           "def f():\n\t\"\"\"Summary.\n\tMore text here aaa bbb ccc ddd.\"\"\"\n"
+           '(1 2)
+           "def f():\n\t\"\"\"Summary.\n\tMore text\n\there aaa bbb\n\tccc ddd.\"\"\"\n")
+          (list
+           #'python-mode
+           70
+           "def f():\n    '''kk,\n    llll ff tttt    '''\n"
+           '(1 2)
+           "def f():\n    '''kk, llll ff tttt '''\n")
+          (list
+           #'python-mode
+           70
+           "\"\"\"Summary.\nMore text here aaa bbb ccc ddd.\"\"\"\n"
+           '(0 1)
+           "\"\"\"Summary. More text here aaa bbb ccc ddd.\"\"\"\n")
+          (list
+           #'emacs-lisp-mode
+           70
+           "(defun f ()\n  \"Summary.\nMore text here aaa bbb ccc ddd.\")\n"
+           '(1 2)
+           "(defun f ()\n  \"Summary. More text here aaa bbb ccc ddd.\")\n")
+          (list
+           #'emacs-lisp-mode
+           20
+           "(defun f ()\n  \"Summary.\nMore text here aaa bbb ccc ddd.\")\n"
+           '(1 2)
+           "(defun f ()\n  \"Summary.\nMore text here aaa\nbbb ccc ddd.\")\n")
+          (list
+           #'emacs-lisp-mode
+           70
+           "(defun f ()\n  \"Summary.\n  More text here aaa bbb ccc ddd.\"\n  nil)\n"
+           '(1 2)
+           "(defun f ()\n  \"Summary. More text here aaa bbb ccc ddd.\"\n  nil)\n")
+          ;; Unchanged: code after the closer, an escaped newline.
+          (list
+           #'python-mode
+           70
+           "def f():\n    \"\"\"Summary.\n    More text here aaa bbb ccc ddd.\"\"\" + x\n"
+           '(1 2)
+           "def f():\n    \"\"\"Summary.\n    More text here aaa bbb ccc ddd.\"\"\" + x\n")
+          (list
+           #'python-mode
+           70
+           "def f():\n    \"\"\"Summary.\\\n    More text here aaa bbb ccc ddd.\"\"\"\n"
+           '(1 2)
+           "def f():\n    \"\"\"Summary.\\\n    More text here aaa bbb ccc ddd.\"\"\"\n")
+          ;; Unchanged: a closer alone on its line.
+          (list
+           #'python-mode
+           70
+           "def f():\n    \"\"\"Summary.\n    More text here aaa bbb ccc ddd.\n    \"\"\"\n"
+           '(1 2 3)
+           "def f():\n    \"\"\"Summary. More text here aaa bbb ccc ddd.\n    \"\"\"\n")
+          ;; Unchanged: a bare opener.
+          (list
+           #'python-mode
+           70
+           "def f():\n    \"\"\"\n    \"\"\"\n"
+           '(1 2)
+           "def f():\n    \"\"\"\n    \"\"\"\n")
+          (list #'python-mode 70 "x = \"\"\"\n\"\"\"\n" '(0 1) "x = \"\"\"\n\"\"\"\n")
+          ;; Unchanged: two words on the opener line.
+          (list
+           #'python-mode
+           70
+           "def f():\n    \"\"\"Summary line.\n    More text here aaa bbb ccc ddd.\"\"\"\n"
+           '(1 2)
+           "def f():\n    \"\"\"Summary line. More text here aaa bbb ccc ddd.\"\"\"\n")
+          (list
+           #'python-mode
+           20
+           "def f():\n    \"\"\"Summary line.\n    More text here aaa bbb ccc ddd.\"\"\"\n"
+           '(1 2)
+           "def f():\n    \"\"\"Summary line.\n    More text here\n    aaa bbb ccc\n    ddd.\"\"\"\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column (nth 1 case)))
+          (dolist (line-index (nth 3 case))
+            (should-fill-same-from-every-position (nth 2 case) line-index (nth 4 case))))))))
+
 (ert-deftest fill-syntax-bounds-python-strings-multi-paragraph ()
   "Python triple-quoted string with blank line should preserve separate paragraphs."
   (let ((fill-column 80)
