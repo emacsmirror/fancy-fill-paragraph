@@ -2979,63 +2979,43 @@ Uses dynamic programming to minimize raggedness."
                  (t
                   (* (- fancy-fill-paragraph--weight-scale (aref break-weights i-1))
                      target-column))))
+               (best-cost-i (aref cost i))
+               (j i-1)
                (line-len (aref lens i-1))
-               (best-cost-i (aref cost i)))
-          ;; Single-item case: items[i-1] alone on a line.
-          ;; No joins, so join-penalty is zero.
-          (let ((prev-cost (aref cost i-1)))
-            (when (< prev-cost best-cost-i)
-              (let* ((line-cost
-                      (cond
-                       (is-last
-                        0)
-                       ((<= line-len local-fill-column)
-                        (let ((slack (- target-column line-len)))
-                          (+ (* slack slack) break-penalty)))
-                       (t
-                        (let ((overflow (- line-len local-fill-column)))
-                          (+ (* overflow overflow fancy-fill-paragraph--overflow-penalty)
-                             break-penalty)))))
-                     (total (+ prev-cost line-cost)))
-                (when (< total best-cost-i)
-                  (aset cost i total)
-                  (aset from i i-1)
-                  (setq best-cost-i total)))))
-          ;; Multi-item candidates: extend line backwards.
-          ;; Only when joining across delimiters is allowed.
-          (when blank-space-positive
-            (let ((j (1- i-1)))
-              (when (>= j 0)
-                ;; Pre-extend to a 2-item line before the loop (single-item
-                ;; was handled above), so the while body always has j < i-1.
-                (setq line-len (+ (aref lens j) (aref sep-lens j) line-len))
-                (let ((join-weight-sum (max 0 (aref break-weights j))))
-                  (while (and (>= j 0) (<= line-len local-fill-column))
-                    (let ((prev-cost (aref cost j)))
-                      (when (< prev-cost best-cost-i)
-                        (let* ((join-penalty
-                                (/ (* join-weight-sum join-cost-factor)
-                                   fancy-fill-paragraph--weight-scale))
-                               (line-cost
-                                (cond
-                                 ;; Last line: only join penalty.
-                                 (is-last
-                                  join-penalty)
-                                 ;; Fits: squared slack + break penalty + join penalty.
-                                 (t
-                                  (let ((slack (- target-column line-len)))
-                                    (+ (* slack slack) break-penalty join-penalty)))))
-                               (total (+ prev-cost line-cost)))
-                          (when (< total best-cost-i)
-                            (aset cost i total)
-                            (aset from i j)
-                            (setq best-cost-i total)))))
-                    ;; Extend to include one more item.
-                    (setq j (1- j))
-                    (when (>= j 0)
-                      (setq line-len (+ (aref lens j) (aref sep-lens j) line-len))
-                      (setq join-weight-sum
-                            (+ join-weight-sum (max 0 (aref break-weights j)))))))))))
+               (join-weight-sum 0))
+          ;; A single item is always a candidate (it may overflow),
+          ;; longer lines only when they fit and joining is allowed.
+          (while (and (>= j 0)
+                      (or (= j i-1) (and blank-space-positive (<= line-len local-fill-column))))
+            (let ((prev-cost (aref cost j)))
+              (when (< prev-cost best-cost-i)
+                (let* ((join-penalty
+                        (/ (* join-weight-sum join-cost-factor)
+                           fancy-fill-paragraph--weight-scale))
+                       (line-cost
+                        (cond
+                         ;; Last line: only join penalty.
+                         (is-last
+                          join-penalty)
+                         ;; Fits: squared slack + break penalty + join penalty.
+                         ((<= line-len local-fill-column)
+                          (let ((slack (- target-column line-len)))
+                            (+ (* slack slack) break-penalty join-penalty)))
+                         ;; Overflow, a single item.
+                         (t
+                          (let ((overflow (- line-len local-fill-column)))
+                            (+ (* overflow overflow fancy-fill-paragraph--overflow-penalty)
+                               break-penalty)))))
+                       (total (+ prev-cost line-cost)))
+                  (when (< total best-cost-i)
+                    (aset cost i total)
+                    (aset from i j)
+                    (setq best-cost-i total)))))
+            ;; Extend to include one more item.
+            (setq j (1- j))
+            (when (>= j 0)
+              (setq line-len (+ (aref lens j) (aref sep-lens j) line-len))
+              (setq join-weight-sum (+ join-weight-sum (max 0 (aref break-weights j)))))))
         (setq i (1+ i))))
 
     ;; Reconstruct lines by walking `from' backwards from n to 0.
