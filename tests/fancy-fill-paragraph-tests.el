@@ -4133,6 +4133,140 @@ checking it was blank, deleting the first letters of the line."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-prefix-tab-mixed-indent-keeps-column ()
+  "Lines indented differently with tabs fill at their least indentation.
+The least indentation was counted in characters and rebuilt from spaces,
+so a tab counted as one column, moving the text to column 1.
+Lines sharing their indentation fill as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (dolist
+        (case
+         (list
+          (list
+           #'text-mode
+           "\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n  lll mmm\n"
+           1
+           "  aaa bbb ccc ddd eee fff ggg\n  hhh iii jjj kkk lll mmm\n")
+          (list
+           #'text-mode
+           "  aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n\tlll mmm\n"
+           1
+           "  aaa bbb ccc ddd eee fff ggg\n  hhh iii jjj kkk lll mmm\n")
+          (list
+           #'text-mode
+           "\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n    lll mmm\n"
+           1
+           "    aaa bbb ccc ddd eee fff\n    ggg hhh iii jjj kkk lll\n    mmm\n")
+          (list
+           #'fundamental-mode
+           "\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n  lll mmm\n"
+           1
+           "  aaa bbb ccc ddd eee fff ggg\n  hhh iii jjj kkk lll mmm\n")
+          ;; The tab is kept where every line starts with it.
+          (list
+           #'text-mode
+           "\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n\t  lll mmm\n"
+           1
+           "\taaa bbb ccc ddd eee\n\tfff ggg hhh iii jjj\n\tkkk\n\t  lll mmm\n")
+          (list
+           #'python-mode
+           (concat
+            "def f():\n    \"\"\"Aaa.\n\n"
+            "\tbbb ccc ddd eee fff ggg hhh iii jjj kkk\n      lll mmm\n    \"\"\"\n")
+           3
+           (concat
+            "def f():\n    \"\"\"Aaa.\n\n"
+            "      bbb ccc ddd eee fff ggg\n      hhh iii jjj kkk lll mmm\n    \"\"\"\n"))
+          (list
+           #'python-mode
+           (concat
+            "def f():\n\t\"\"\"Aaa.\n\n"
+            "\tbbb ccc ddd eee fff ggg hhh iii jjj kkk\n\t  lll mmm\n\t\"\"\"\n")
+           3
+           (concat
+            "def f():\n\t\"\"\"Aaa.\n\n"
+            "\tbbb ccc ddd eee fff\n\tggg hhh iii jjj kkk\n\t  lll mmm\n\t\"\"\"\n"))
+          (list
+           #'emacs-lisp-mode
+           (concat
+            "(defun f ()\n  \"Aaa.\n\n"
+            "\tbbb ccc ddd eee fff ggg hhh iii jjj kkk\n  lll mmm\")\n")
+           3
+           (concat
+            "(defun f ()\n  \"Aaa.\n\n"
+            "  bbb ccc ddd eee fff ggg hhh\n  iii jjj kkk lll mmm\")\n"))
+          (list
+           #'c-mode
+           "/*\n\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n   lll mmm\n*/\n"
+           1
+           "/*\n   aaa bbb ccc ddd eee fff ggg\n   hhh iii jjj kkk lll mmm\n*/\n")
+          (list
+           #'c-mode "\t/*\n\t   aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n\t     lll mmm */\n" 1
+           (concat
+            "\t/*\n\t   aaa bbb ccc ddd eee\n\t   fff ggg hhh iii jjj\n"
+            "\t   kkk\n\t     lll mmm */\n"))
+          ;; Filling again from the last line moved the text.
+          (list
+           #'text-mode
+           "\t  aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n\tlll mmm\n"
+           1
+           "\t  aaa bbb ccc ddd eee\n\t  fff ggg hhh iii jjj\n\t  kkk\n\tlll mmm\n")
+          (list
+           #'python-mode
+           (concat
+            "def f():\n\t\"\"\"Aaa.\n\n"
+            "\t  bbb ccc ddd eee fff ggg hhh iii jjj kkk\n\tlll mmm\n\t\"\"\"\n")
+           3
+           (concat
+            "def f():\n\t\"\"\"Aaa.\n\n"
+            "\t  bbb ccc ddd eee fff\n\t  ggg hhh iii jjj kkk\n\tlll mmm\n\t\"\"\"\n"))
+          ;; Unchanged: every line indented the same.
+          (list
+           #'text-mode
+           "\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n\tlll mmm\n"
+           1
+           "\taaa bbb ccc ddd eee\n\tfff ggg hhh iii jjj\n\tkkk lll mmm\n")
+          (list
+           #'text-mode
+           "\t  aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n\t  lll mmm\n"
+           1
+           "\t  aaa bbb ccc ddd eee\n\t  fff ggg hhh iii jjj\n\t  kkk lll mmm\n")
+          (list
+           #'python-mode
+           (concat
+            "def f():\n\t\"\"\"Aaa.\n\n"
+            "\tbbb ccc ddd eee fff ggg hhh iii jjj kkk\n\tlll mmm\n\t\"\"\"\n")
+           3
+           (concat
+            "def f():\n\t\"\"\"Aaa.\n\n"
+            "\tbbb ccc ddd eee fff\n\tggg hhh iii jjj kkk\n\tlll mmm\n\t\"\"\"\n"))
+          (list
+           #'c-mode
+           "\t/*\n\t   aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n\t   lll mmm */\n"
+           1
+           "\t/*\n\t   aaa bbb ccc ddd eee\n\t   fff ggg hhh iii jjj\n\t   kkk lll mmm */\n")
+          ;; Unchanged: spaces only.
+          (list
+           #'text-mode
+           "    aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk\n  lll mmm\n"
+           1
+           "    aaa bbb ccc ddd eee fff\n    ggg hhh iii jjj kkk\n  lll mmm\n")
+          (list
+           #'python-mode
+           (concat
+            "def f():\n    \"\"\"Aaa.\n\n"
+            "      bbb ccc ddd eee fff ggg hhh iii jjj kkk\n    lll mmm\n    \"\"\"\n")
+           3
+           (concat
+            "def f():\n    \"\"\"Aaa.\n\n"
+            "      bbb ccc ddd eee fff ggg\n      hhh iii jjj kkk\n    lll mmm\n    \"\"\"\n"))))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column 30))
+          (should-fill-same-from-every-position (nth 1 case) (nth 2 case) (nth 3 case)))))))
+
 
 ;; ---------------------------------------------------------------------------
 ;; Fill-Column-Margin Clamp Test

@@ -2749,7 +2749,8 @@ plain indentation so continuation lines align correctly."
 
 (defun fancy-fill-paragraph--validated-fill-prefix (beg end prefix prefix-column-width)
   "Return a validated (PREFIX PREFIX-COLUMN-WIDTH) for BEG..END.
-If PREFIX does not match every line, fall back to the minimum line indent."
+If PREFIX does not match every line, fall back to the least indentation
+of the lines, as written (tabs for e.g.) and measured in columns."
   (declare (important-return-value t))
   (cond
    ((string-empty-p prefix)
@@ -2758,12 +2759,17 @@ If PREFIX does not match every line, fall back to the minimum line indent."
     (save-excursion
       (goto-char beg)
       (let ((all-match t)
-            (min-indent most-positive-fixnum))
+            (min-indent "")
+            (min-indent-col most-positive-fixnum))
         ;; Early exit: after every visited line has contributed to
         ;; `min-indent', a mismatch plus zero indent fixes the result at "".
-        (while (and (< (point) end) (or all-match (> min-indent 0)))
-          (let ((line (buffer-substring-no-properties (point) (pos-eol))))
-            (setq min-indent (min min-indent (fancy-fill-paragraph--leading-indent line)))
+        (while (and (< (point) end) (or all-match (> min-indent-col 0)))
+          (let* ((line (buffer-substring-no-properties (point) (pos-eol)))
+                 (indent (fancy-fill-paragraph--leading-indent-string line))
+                 (indent-col (fancy-fill-paragraph--string-column-width indent)))
+            (when (< indent-col min-indent-col)
+              (setq min-indent indent)
+              (setq min-indent-col indent-col))
             (when (and all-match (not (string-prefix-p prefix line)))
               (setq all-match nil)))
           (forward-line 1))
@@ -2771,7 +2777,7 @@ If PREFIX does not match every line, fall back to the minimum line indent."
          (all-match
           (list prefix prefix-column-width))
          (t
-          (list (make-string min-indent ?\s) min-indent))))))))
+          (list min-indent min-indent-col))))))))
 
 (defun fancy-fill-paragraph--analyze-fill-prefix (beg end dp-list)
   "Return the effective (PREFIX PREFIX-COLUMN-WIDTH) for BEG..END."
