@@ -8278,6 +8278,58 @@ mixed-gap lines join and all content characters survive."
         (fancy-fill-paragraph)
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-python-comments-tab-gap-first-line-width ()
+  "A first line after a tab gap wraps as wide as the lines after it.
+The first line's prefix was measured over the buffer's line, as if it
+held the prefix, so a tab where the prefix has spaces counted the text
+past it too, wrapping the first line short.
+Space gaps and tabs before the opener fill as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'python-mode
+               "#\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n"
+               "#       aaa bbb ccc ddd eee\n#       fff ggg hhh iii jjj\n#       kkk lll\n")
+              (list
+               #'python-mode "x = 1  #\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n"
+               (concat
+                "x = 1  #        aaa bbb ccc\n       #        ddd eee fff\n"
+                "       #        ggg hhh iii\n       #        jjj kkk lll\n"))
+              ;; The prefix read from a later line.
+              (list
+               #'python-mode
+               "#\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n# mmm\n"
+               "# aaa bbb ccc ddd eee fff ggg\n# hhh iii jjj kkk lll mmm\n")
+              (list
+               #'c++-mode
+               "//\taaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n"
+               "//      aaa bbb ccc ddd eee\n//      fff ggg hhh iii jjj\n//      kkk lll\n")
+              ;; Unchanged: a space gap.
+              (list
+               #'python-mode
+               "# aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n# mmm\n"
+               "# aaa bbb ccc ddd eee fff ggg\n# hhh iii jjj kkk lll mmm\n")
+              ;; Unchanged: a tab before the opener only.
+              (list
+               #'python-mode "x = 1\t# aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n"
+               (concat
+                "x = 1\t# aaa bbb ccc ddd eee\n        # fff ggg hhh iii jjj\n"
+                "        # kkk lll\n"))
+              ;; Unchanged: wide characters before the opener are counted.
+              (list
+               #'python-mode
+               "x = '\u65e5\u672c'  # aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll\n"
+               (concat
+                "x = '\u65e5\u672c'  # aaa bbb ccc ddd\n            # eee fff ggg hhh\n"
+                "            # iii jjj kkk lll\n"))))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column 30))
+          (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case)))))))
+
 (ert-deftest fill-syntax-bounds-python-comments-wide-paragraph-keeps-gap ()
   "A wide-gap paragraph must keep its prefix beside a narrow one.
 The continuation prefix is derived per paragraph; a narrower

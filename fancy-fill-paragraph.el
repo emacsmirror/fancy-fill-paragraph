@@ -1999,14 +1999,18 @@ Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
   (pcase-let* ((`(,lines ,closer) (fancy-fill-paragraph--lines-split-closer lines closer))
                (prefix-col (or prefix-col (string-width cont-prefix)))
-               ;; FIRST-PREFIX starts at REPLACE-BEG, measure its end column there,
+               ;; FIRST-PREFIX starts at REPLACE-BEG, lay it out from there,
                ;; so code before a trailing comment's opener is counted too.
                ;; A narrower FIRST-PREFIX leaves the first line as wide as the others.
+               ;; NOTE: measured as written, the buffer may lay it out
+               ;; differently (`#<TAB>' refilled as `# ' for e.g.).
                (first-line-extra-width
                 (and first-prefix
                      (max 0
-                          (- (fancy-fill-paragraph--prefix-column-width
-                              replace-beg first-prefix)
+                          (- (fancy-fill-paragraph--string-column-width first-prefix
+                                                                        (save-excursion
+                                                                          (goto-char replace-beg)
+                                                                          (current-column)))
                              prefix-col))))
                (result
                 (fancy-fill-paragraph--fill-and-reprefix
