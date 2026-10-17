@@ -253,17 +253,6 @@ is kept whole, so the result can be wider."
      ;; A tab straddling OPENER-COL leaves point past it, nothing to pad.
      (make-string (max 0 (- opener-col (current-column))) ?\s))))
 
-(defsubst fancy-fill-paragraph--prefix-column-width (pos prefix)
-  "Return the column width of PREFIX at buffer position POS.
-A line ending within PREFIX, such as a bare ` *' separator without the
-trailing space of ` * ', is measured as if it held all of PREFIX."
-  (declare (important-return-value t))
-  (save-excursion
-    (goto-char pos)
-    (goto-char (min (+ pos (length prefix)) (pos-eol)))
-    ;; Measure what the line holds, tabs included, then add the rest.
-    (+ (current-column) (string-width (substring prefix (- (point) pos))))))
-
 (defsubst fancy-fill-paragraph--last-bol (end)
   "Return the beginning-of-line position for buffer position END."
   (declare (important-return-value t))
@@ -1304,11 +1293,8 @@ overlapping that selection.  Otherwise fill the paragraph at point."
                   (prefix (plist-get prefix-info :prefix))
                   (first-prefix (plist-get prefix-info :first-prefix))
                   (prefix-col (plist-get prefix-info :prefix-col)))
-             (fancy-fill-paragraph--fill-prefixed-region para-beg para-end prefix
-                                                         first-prefix
-                                                         nil
-                                                         nil
-                                                         prefix-col))))))))
+             (fancy-fill-paragraph--fill-prefixed-region para-beg para-end prefix prefix-col
+                                                         first-prefix))))))))
 
 (defun fancy-fill-paragraph--line-comment-syntax-start-p (syn-start)
   "Return non-nil when SYN-START begins a line comment."
@@ -2057,21 +2043,19 @@ Returns non-nil when any paragraph changed."
     changed))
 
 (defun fancy-fill-paragraph--fill-prefixed-region
-    (beg end cont-prefix &optional first-prefix first-line-text replace-beg prefix-col closer)
+    (beg end cont-prefix prefix-col &optional first-prefix first-line-text replace-beg closer)
   "Strip lines from BEG..END, fill with CONT-PREFIX, and replace the region.
-Lines are stripped of CONT-PREFIX width columns.  When FIRST-LINE-TEXT
-is non-nil it is prepended as the first line (e.g. opener-line body text).
+PREFIX-COL is the width of CONT-PREFIX, the columns stripped from each
+line (e.g. line comments may strip fewer columns than the literal
+prefix string occupies).  When FIRST-LINE-TEXT is non-nil it is
+prepended as the first line (e.g. opener-line body text).
 FIRST-PREFIX, when non-nil, is used on the first output line.
 REPLACE-BEG, when non-nil, overrides BEG as the replacement start
 \(e.g. to include the opener line in the replaced span).
-PREFIX-COL, when non-nil, overrides the buffer-measured width of
-CONT-PREFIX at BEG (e.g. line comments may strip fewer columns than
-the literal prefix string occupies).
 CLOSER is passed to `fancy-fill-paragraph--fill-prefixed-paragraph'.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
-  (let* ((prefix-col (or prefix-col (fancy-fill-paragraph--prefix-column-width beg cont-prefix)))
-         ;; FIRST-LINE-TEXT supplies the opener line, so every line in the
+  (let* ( ;; FIRST-LINE-TEXT supplies the opener line, so every line in the
          ;; range is a continuation carrying the synthesized CONT-PREFIX.
          ;; Without it the range opens on the delimiter line, and the prefix
          ;; was read from the buffer, so neither may be matched literally.
@@ -2218,8 +2202,8 @@ Returns non-nil when the buffer was modified."
           ;; text with body lines using the opener prefix for line 1.
           ((and opener-text (= para-beg beg))
            (fancy-fill-paragraph--fill-prefixed-region
-            (car inner-body) para-end cont-prefix
-            opener-prefix opener-text beg prefix-col para-closer))
+            (car inner-body) para-end cont-prefix prefix-col
+            opener-prefix opener-text beg para-closer))
           (t
            (funcall para-fill-fn para-beg para-end para-closer)))))
      cont-prefix)))
@@ -2740,7 +2724,12 @@ Return non-nil when the buffer was modified, nil when unchanged."
   "Return (PREFIX PREFIX-COLUMN-WIDTH) detected for BEG..END."
   (declare (important-return-value t))
   (let ((prefix (or fill-prefix (fill-context-prefix beg end) "")))
-    (list prefix (fancy-fill-paragraph--prefix-column-width beg prefix))))
+    (list
+     prefix
+     (fancy-fill-paragraph--string-column-width prefix
+                                                (save-excursion
+                                                  (goto-char beg)
+                                                  (current-column))))))
 
 (defun fancy-fill-paragraph--dot-point-safe-prefix (first-line prefix prefix-column-width dp-list)
   "Return a dot-point-safe (PREFIX PREFIX-COLUMN-WIDTH).
