@@ -114,8 +114,11 @@ changes, the same as an already filled paragraph.
 A line holding a line comment is left as it is when the prose around
 it is filled, a block comment (`<!-- -->' in `html-mode' for e.g.) is
 filled with the prose, remaining a comment.  Comments are found from
-the mode's syntax table, so a comment the syntax table doesn't mark
-\(`..' in `rst-mode' for e.g.) is filled as prose."
+the mode's syntax table.  A line comment the syntax table doesn't mark
+is found from `comment-start-skip', as `newcomment' finds it (`#' in
+`org-mode' for e.g.).  When the mode's adaptive fill continues such a
+line another way (by indentation, `..' in `rst-mode' for e.g.), it's
+filled as prose instead."
   :type 'boolean)
 
 
@@ -978,8 +981,9 @@ for e.g.).  On a comment line the cursor fills the comment instead."
          (save-excursion
            (goto-char (pos-bol))
            (and (not (looking-at-p "[ \t]*$")) (looking-at-p paragraph-separate)))
-         (fancy-fill-paragraph--comment-or-string-start-at
-          (fancy-fill-paragraph--line-last-non-blank (point))))
+         (or (fancy-fill-paragraph--regexp-comment-delimiter)
+             (fancy-fill-paragraph--comment-or-string-start-at
+              (fancy-fill-paragraph--line-last-non-blank (point)))))
     (cons (pos-bol) (pos-eol)))
    (t
     (fancy-fill-paragraph--paragraph-bounds))))
@@ -1069,8 +1073,32 @@ are excluded even when unterminated."
                 (= (syntax-class nl-syn) 12)
                 (= (fancy-fill-paragraph--syntax-comment-style nl-syn) style))))))
 
-(defun fancy-fill-paragraph--line-comment-delimiter-end (pos)
+(defun fancy-fill-paragraph--comment-start-skip-end (pos &optional beg)
+  "Return the end of the comment opener `comment-start-skip' matches at POS.
+The match may start from BEG on POS's line (POS by default), matching
+blank-space before the opener for e.g.  Blank-space after the opener
+isn't included.  Return nil when there's no match from BEG, or the first
+one's opener starts after POS.
+NOTE: as `comment-search-forward' does, when `comment-use-syntax' is nil
+the opener starts where the regexp's first group ends, when it has one.
+`comment-normalize-vars' builds a regexp whose first group matches the
+character before the opener, so taking the match start would make text
+part of the opener (`x#' in `authinfo-mode' for e.g.)."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char (or beg pos))
+    (and comment-start-skip
+         (re-search-forward comment-start-skip (pos-eol) t)
+         (<= (or (and (not comment-use-syntax) (match-end 1)) (match-beginning 0)) pos)
+         (progn
+           (goto-char (match-end 0))
+           (skip-chars-backward " \t" pos)
+           (point)))))
+
+(defun fancy-fill-paragraph--line-comment-syntax-run-end (pos)
   "Return the end position of the line comment delimiter run at POS.
+The run is found from the syntax table, see
+`fancy-fill-paragraph--line-comment-delimiter-end' for the delimiter.
 POS must be at a line comment opener: a class 11 character or the
 first character of a two-character opener.  The run spans repeated
 delimiter characters so leaders such as \";;;\" or \"///\" stay
@@ -1099,6 +1127,43 @@ whole.  Return nil when POS is not at a delimiter."
      (t
       nil))))
 
+(defun fancy-fill-paragraph--line-comment-delimiter-end (pos)
+  "Return the end position of the line comment delimiter at POS.
+POS must be at a line comment opener, one the syntax table marks, see
+`fancy-fill-paragraph--line-comment-syntax-run-end', or the start of a
+delimiter found by regexp, see `fancy-fill-paragraph--regexp-comment-delimiter'.
+Return nil when POS is not at a delimiter."
+  (declare (important-return-value t))
+  (let ((run-end (fancy-fill-paragraph--line-comment-syntax-run-end pos)))
+    (cond
+     (run-end
+      ;; NOTE: an opener that is a word may have only its first character
+      ;; marked (`rem' in `bat-mode', `@c' in `texinfo-mode' for e.g.), the
+      ;; rest repeated as text would end the comment, so the run takes in
+      ;; what `comment-start-skip' matches.  A regexp may match into the
+      ;; comment's text too (Fortran's matches a repeated character after
+      ;; `!', `!oo' of `!oops', or all of `!zzz', for e.g.), which would
+      ;; then be repeated, so a word is only taken when the run isn't an
+      ;; opener on its own.
+      (let ((skip-end (fancy-fill-paragraph--comment-start-skip-end pos)))
+        (cond
+         ((not (and skip-end (< run-end skip-end)))
+          run-end)
+         ;; The match past the run has no word characters (`##' in `sh-mode' for e.g.).
+         ((not (save-excursion
+                 (goto-char run-end)
+                 (re-search-forward "\\sw" skip-end t)))
+          skip-end)
+         ;; The regexp matches the run alone, the word is the comment's text.
+         ((save-restriction
+            (narrow-to-region (point-min) run-end)
+            (fancy-fill-paragraph--comment-start-skip-end pos))
+          run-end)
+         (t
+          skip-end))))
+     (t
+      (fancy-fill-paragraph--regexp-comment-delimiter-end pos)))))
+
 (defun fancy-fill-paragraph--line-comment-pos-at-col (indent-col delim-str)
   "Return line comment opener at INDENT-COL, or nil.
 DELIM-STR is the delimiter run of the block opener; a comment whose
@@ -1111,14 +1176,21 @@ by column and would delete or distort a mismatched delimiter."
     ;; tab or the line is short; a comment at the resulting column is
     ;; at a different indentation and must not join the block.
     (and (= (move-to-column indent-col) indent-col)
-         (fancy-fill-paragraph--line-comment-opener-at-point-p)
-         (let ((comment-pos (point))
-               (delim-end (fancy-fill-paragraph--line-comment-delimiter-end (point))))
+         (let* ((comment-pos (point))
+                (syntax-p (fancy-fill-paragraph--line-comment-opener-at-point-p))
+                (delim-end
+                 (cond
+                  (syntax-p
+                   (fancy-fill-paragraph--line-comment-delimiter-end comment-pos))
+                  (t
+                   ;; A delimiter the syntax table doesn't mark.
+                   (fancy-fill-paragraph--regexp-comment-delimiter-end comment-pos)))))
            (and delim-end
                 (equal delim-str (buffer-substring-no-properties comment-pos delim-end))
-                (let ((ppss (syntax-ppss delim-end)))
-                  (and (ppss-comment-depth ppss)
-                       (= (ppss-comment-or-string-start ppss) comment-pos)))
+                (or (not syntax-p)
+                    (let ((ppss (syntax-ppss delim-end)))
+                      (and (ppss-comment-depth ppss)
+                           (= (ppss-comment-or-string-start ppss) comment-pos))))
                 comment-pos)))))
 
 (defun fancy-fill-paragraph--line-comment-fill-beg (comment-pos)
@@ -1293,6 +1365,114 @@ overlapping that selection.  Otherwise fill the paragraph at point."
      (t
       nil))))
 
+(defun fancy-fill-paragraph--regexp-comment-adaptive-prefix-p (line-beg delim-end line-end)
+  "Return non-nil when the mode's adaptive fill prefix continues a comment.
+The line LINE-BEG..LINE-END opens with a comment found by regexp, its
+delimiter ending at DELIM-END.  The prefix continues the comment when
+it's nothing, the delimiter and blank-space, or the delimiter and a
+dot-point after it, the item continued under its text as in any
+comment, see `fancy-fill-paragraph--regexp-comment-delimiter'.
+NOTE: an item without text is left to the prose fill, the line comment
+fill would drop its dot-point (`;; - ' alone on its line for e.g.)."
+  (declare (important-return-value t))
+  (let ((adaptive
+         (save-excursion
+           (goto-char line-beg)
+           (or (fill-match-adaptive-prefix) ""))))
+    (or (string-empty-p adaptive)
+        (string-match-p
+         (concat
+          "\\`" (regexp-quote (buffer-substring-no-properties line-beg delim-end)) "[ \t]*\\'")
+         adaptive)
+        (let ((text-beg (fancy-fill-paragraph--dot-point-text-beg delim-end line-end)))
+          (and text-beg
+               (< text-beg line-end)
+               (<= (- delim-end line-beg) (length adaptive))
+               (string-prefix-p adaptive (buffer-substring-no-properties line-beg text-beg)))))))
+
+(defun fancy-fill-paragraph--regexp-comment-delimiter ()
+  "Return (BEG . END) of the delimiter of a comment found by regexp, or nil.
+Return nil unless the line at point opens with a line comment the
+syntax table doesn't mark, which `newcomment' finds by regexp
+\(`comment-use-syntax' is nil, `#' in `org-mode' for e.g.).  The
+delimiter is what `comment-start-skip' matches at the start of the
+line, less the blank-space after it, see
+`fancy-fill-paragraph--comment-start-skip-end'.
+Comment variables must be set up first, see `comment-normalize-vars'.
+NOTE: the comment is only filled with its delimiter repeated when the
+mode's adaptive fill prefix for the line is the delimiter, or nothing
+\(`XCOMM' in `makefile-imake-mode' for e.g.), or the delimiter and a
+dot-point after it (`> - ' in `mail-mode' for e.g.).  Otherwise the mode
+continues the line in its own way, by indentation (`..' in `rst-mode')
+or with a longer prefix (a quote within a quote in `mail-mode'), so
+it's left to the prose fill, which follows the mode."
+  (declare (important-return-value t))
+  (and comment-start-skip
+       (not comment-use-syntax) (equal comment-end "")
+       (save-excursion
+         (goto-char (pos-bol))
+         (let ((line-beg (point))
+               (line-end (pos-eol))
+               (delim-beg
+                (progn
+                  (skip-chars-forward " \t")
+                  (point))))
+           ;; NOTE: blank-space in the regexp may match a newline, so a
+           ;; blank line would match the comment after it.
+           (and (< delim-beg line-end)
+                ;; Only blank-space may come before the delimiter, otherwise
+                ;; the comment doesn't open the line.
+                (let ((delim-end
+                       (fancy-fill-paragraph--comment-start-skip-end delim-beg line-beg)))
+                  ;; NOTE: only a comment is checked for, a string may be
+                  ;; prose opened by a stray quote (`\"' in `org-mode' for
+                  ;; e.g.), running on past the comment.
+                  (and delim-end
+                       (< delim-beg delim-end) (not (nth 4 (syntax-ppss delim-end)))
+                       (fancy-fill-paragraph--regexp-comment-adaptive-prefix-p
+                        line-beg delim-end line-end)
+                       (cons delim-beg delim-end))))))))
+
+(defun fancy-fill-paragraph--regexp-comment-delimiter-end (pos)
+  "Return the end of the delimiter of a comment found by regexp at POS.
+Return nil unless such a delimiter starts at POS, see
+`fancy-fill-paragraph--regexp-comment-delimiter'."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char pos)
+    (let ((delim (fancy-fill-paragraph--regexp-comment-delimiter)))
+      (and delim (= (car delim) pos) (cdr delim)))))
+
+(defun fancy-fill-paragraph--line-comment-fill-job (opener-pos &optional sel-bounds search-bounds)
+  "Return a fill job for the block of line comments around OPENER-POS.
+SEL-BOUNDS and SEARCH-BOUNDS are as for
+`fancy-fill-paragraph--syntax-fill-job-at'."
+  (declare (important-return-value t))
+  (let ((bounds
+         (fancy-fill-paragraph--line-comment-bounds
+          opener-pos
+          (or (car search-bounds) (point-min))
+          (or (cdr search-bounds) (point-max)))))
+    (fancy-fill-paragraph--syntax-fill-job-create
+     :beg (car bounds)
+     :end (cdr bounds)
+     :fill-fn #'fancy-fill-paragraph--fill-line-comment-region
+     :args (list (car sel-bounds) (cdr sel-bounds))
+     :resume (1+ (cdr bounds)))))
+
+(defun fancy-fill-paragraph--regexp-comment-jobs-at (&optional sel-bounds)
+  "Return the fill jobs for the comment at point found by regexp, or nil.
+The list holds one job, filling the comment as a block of line comments,
+see `fancy-fill-paragraph--regexp-comment-delimiter'.  SEL-BOUNDS is as
+for `fancy-fill-paragraph--syntax-fill-job-at'.
+Return nil when `fancy-fill-paragraph-syntax-bounds' is nil, as
+`fancy-fill-paragraph--syntax-fill-jobs-in-range' does."
+  (declare (important-return-value t))
+  (let ((delim
+         (and fancy-fill-paragraph-syntax-bounds
+              (fancy-fill-paragraph--regexp-comment-delimiter))))
+    (and delim (list (fancy-fill-paragraph--line-comment-fill-job (car delim) sel-bounds)))))
+
 (defun fancy-fill-paragraph--syntax-fill-job-at (syn-start &optional sel-bounds search-bounds)
   "Return a syntax fill job for the region starting at SYN-START.
 When SEL-BOUNDS is non-nil, include its bounds so only overlapping
@@ -1325,17 +1505,7 @@ SEARCH-BOUNDS limits line-comment block expansion."
        ((progn
           (goto-char syn-start)
           (fancy-fill-paragraph--line-comment-syntax-start-p syn-start))
-        (let ((bounds
-               (fancy-fill-paragraph--line-comment-bounds
-                syn-start
-                (or (car search-bounds) (point-min))
-                (or (cdr search-bounds) (point-max)))))
-          (fancy-fill-paragraph--syntax-fill-job-create
-           :beg (car bounds)
-           :end (cdr bounds)
-           :fill-fn #'fancy-fill-paragraph--fill-line-comment-region
-           :args (list sel-beg sel-end)
-           :resume (1+ (cdr bounds)))))
+        (fancy-fill-paragraph--line-comment-fill-job syn-start sel-bounds search-bounds))
        ;; String: advance past closer, an unclosed string has no job.
        ;; NOTE: in a prose mode a string is quoted prose (a double quote has
        ;; string syntax in `org-mode' for e.g.), with no code around it, so
@@ -1569,6 +1739,8 @@ apply."
 
 (defun fancy-fill-paragraph--fill-prose-region (beg end)
   "Fill BEG..END as prose, a line holding a line comment left as it is.
+A blank line is left as it is too, the lines before and after it filled
+on their own.
 NOTE: a line comment ends with its line, so text joined after it would
 be commented out, and text it wrapped onto the next line uncommented
 \(prose beside a `%' comment in `latex-mode' for e.g.).  The lines
@@ -1586,11 +1758,19 @@ Return non-nil when the buffer was modified."
       (goto-char beg)
       (while (not done)
         (cond
-         ((and fancy-fill-paragraph-syntax-bounds
-               (let ((ppss (save-excursion (syntax-ppss (pos-eol)))))
-                 (and (nth 4 ppss)
-                      (<= (pos-bol) (nth 8 ppss))
-                      (fancy-fill-paragraph--line-comment-syntax-start-p (nth 8 ppss)))))
+         ((or
+           ;; A blank line separates paragraphs, BEG..END only holds one when it
+           ;; spans more than one paragraph (the cursor on a blank line before a
+           ;; comment for e.g.), each filled on its own.
+           (save-excursion
+             (goto-char (pos-bol))
+             (looking-at-p "[ \t]*$"))
+           (and fancy-fill-paragraph-syntax-bounds
+                (or (fancy-fill-paragraph--regexp-comment-delimiter)
+                    (let ((ppss (save-excursion (syntax-ppss (pos-eol)))))
+                      (and (nth 4 ppss)
+                           (<= (pos-bol) (nth 8 ppss))
+                           (fancy-fill-paragraph--line-comment-syntax-start-p (nth 8 ppss)))))))
           (when run-beg
             (push (cons run-beg (1- (pos-bol))) runs)
             (setq run-beg nil)))
@@ -1612,7 +1792,9 @@ The selection is taken to cover whole paragraphs, each line filled as
 with the cursor on it, see `fancy-fill-paragraph--by-point-impl', last
 to first, each found by a marker.  A comment or string fills the body
 paragraphs within those paragraphs at once, its other lines then left,
-as is a paragraph without one after filling it.
+as is a paragraph without one after filling it.  A comment found by
+regexp isn't one, its lines are filled after the prose, which leaves
+them.
 NOTE: filling by paragraph rather than by line would be quicker, however
 a paragraph's lines may fill differently (code before a doc-string for
 e.g.).  Restricting the fill to the selection took rules of its own,
@@ -1637,9 +1819,22 @@ Return non-nil when the buffer was modified."
         (forward-line 1))
       ;; Pushed first to last, so they fill last to first.
       (unwind-protect
-          (let ((skip-beg nil))
+          (let ((skip-beg nil)
+                ;; As SKIP-BEG, for a paragraph whose prose is filled.  Its
+                ;; lines holding a comment found by regexp are filled still,
+                ;; as the prose fill leaves them.
+                ;; NOTE: skipping none of the paragraph's lines would fill it
+                ;; again from each of them, quadratic in its length.
+                (prose-skip-beg nil))
             (dolist (line lines)
-              (unless (and skip-beg (<= skip-beg line))
+              (unless (or (and skip-beg (<= skip-beg line))
+                          (and prose-skip-beg
+                               (<= prose-skip-beg line)
+                               (not
+                                (and fancy-fill-paragraph-syntax-bounds
+                                     (save-excursion
+                                       (goto-char line)
+                                       (fancy-fill-paragraph--regexp-comment-delimiter))))))
                 (goto-char line)
                 (let* ((pos (point))
                        (bounds (fancy-fill-paragraph--paragraph-bounds))
@@ -1658,20 +1853,18 @@ Return non-nil when the buffer was modified."
                               pos
                               (fancy-fill-paragraph--syntax-fill-job-end job))
                       (setq own-beg (fancy-fill-paragraph--syntax-fill-job-beg job))))
-                  (setq skip-beg
-                        (cond
-                         ;; Its comment or string is filled for the whole selection.
-                         (own-beg
-                          own-beg)
-                         ;; It fills the same from each of its lines.
-                         ((not
-                           (and fancy-fill-paragraph-syntax-bounds
-                                (car
-                                 (fancy-fill-paragraph--range-syntax-regions
-                                  (car bounds) para-end))))
-                          (car bounds))
-                         (t
-                          nil)))
+                  (cond
+                   ;; Its comment or string is filled for the whole selection.
+                   (own-beg
+                    (setq skip-beg own-beg))
+                   ;; It fills the same from each of its lines, see
+                   ;; PROSE-SKIP-BEG for comments found by regexp.
+                   ((not
+                     (and fancy-fill-paragraph-syntax-bounds
+                          (car
+                           (fancy-fill-paragraph--range-syntax-regions
+                            (car bounds) para-end))))
+                    (setq prose-skip-beg (car bounds))))
                   (set-marker para-end nil)))))
         (dolist (line lines)
           (set-marker line nil))
@@ -2578,8 +2771,37 @@ of the lines, as written (tabs for e.g.) and measured in columns."
          (t
           (list min-indent min-indent-col))))))))
 
+(defun fancy-fill-paragraph--hanging-first-prefix (beg end prefix prefix-column-width)
+  "Return the first line's own prefix when PREFIX hangs under it, or nil.
+PREFIX is blank-space the first line of BEG..END doesn't start with,
+which the mode's adaptive fill gives for that line, so it continues
+the line indented under its text (`..' in `rst-mode' for e.g.).  The
+first line's text must start at PREFIX-COLUMN-WIDTH, after blank-space,
+and every other line must start with PREFIX.
+NOTE: a prefix the first line's adaptive fill doesn't give is left to
+`fancy-fill-paragraph--validated-fill-prefix'.  `fill-context-prefix'
+gives blank-space for a line's own prefix (`> ' or `- ' on a line of
+its own for e.g.), which isn't the mode continuing it indented."
+  (declare (important-return-value t))
+  (save-excursion
+    (goto-char beg)
+    (and (bolp)
+         (string-match-p "\\`[ \t]+\\'" prefix)
+         (not (fancy-fill-paragraph--line-matches-prefix-p prefix))
+         (equal prefix (fill-match-adaptive-prefix))
+         (= (move-to-column prefix-column-width) prefix-column-width)
+         (memq (char-before) '(?\s ?\t))
+         (not (memq (char-after) '(?\s ?\t ?\n nil)))
+         (let ((first-prefix (buffer-substring-no-properties (pos-bol) (point)))
+               (all-match t))
+           (while (and all-match (zerop (forward-line 1)) (< (point) end))
+             (setq all-match (fancy-fill-paragraph--line-matches-prefix-p prefix)))
+           (and all-match first-prefix)))))
+
 (defun fancy-fill-paragraph--analyze-fill-prefix (beg end dp-list)
-  "Return the effective (PREFIX PREFIX-COLUMN-WIDTH) for BEG..END."
+  "Return the effective (PREFIX PREFIX-COLUMN-WIDTH FIRST-PREFIX) for BEG..END.
+FIRST-PREFIX, when non-nil, is the first line's own prefix, used on it
+instead of PREFIX, see `fancy-fill-paragraph--hanging-first-prefix'."
   (declare (important-return-value t))
   (let ((first-line
          (save-excursion
@@ -2589,8 +2811,14 @@ of the lines, as written (tabs for e.g.) and measured in columns."
                   (fancy-fill-paragraph--detect-fill-prefix beg end))
                  (`(,prefix ,prefix-column-width)
                   (fancy-fill-paragraph--dot-point-safe-prefix
-                   first-line prefix prefix-column-width dp-list)))
-      (fancy-fill-paragraph--validated-fill-prefix beg end prefix prefix-column-width))))
+                   first-line prefix prefix-column-width dp-list))
+                 (first-prefix
+                  (fancy-fill-paragraph--hanging-first-prefix beg end prefix prefix-column-width)))
+      (cond
+       (first-prefix
+        (list prefix prefix-column-width first-prefix))
+       (t
+        (fancy-fill-paragraph--validated-fill-prefix beg end prefix prefix-column-width))))))
 
 (defun fancy-fill-paragraph--strip-region-lines (beg end prefix-column-width &optional cont-prefix)
   "Return region lines from BEG..END with PREFIX-COLUMN-WIDTH stripped.
@@ -2863,6 +3091,23 @@ line for one."
       (setq entries-remaining (cdr entries-remaining)))
     result))
 
+(defun fancy-fill-paragraph--dot-point-text-beg (pos limit)
+  "Return where the text of the item with a dot-point at POS starts, or nil.
+The text starts after the dot-point and the blank-space after it, at
+LIMIT when it has none.  Blank-space may come before the dot-point, see
+`fancy-fill-paragraph--line-dot-point-match'.  Return nil without a
+dot-point at POS."
+  (declare (important-return-value t))
+  (let ((m
+         (fancy-fill-paragraph--line-dot-point-match
+          (buffer-substring-no-properties pos limit)
+          (fancy-fill-paragraph--compile-dot-point-patterns))))
+    (and m
+         (save-excursion
+           (goto-char (+ pos (car m) (length (cdr m))))
+           (skip-chars-forward " \t" limit)
+           (point)))))
+
 (defun fancy-fill-paragraph--dot-point-item-prefix-p (item dot-points)
   "Return non-nil when ITEM would look like a dot-point start.
 DOT-POINTS is from `fancy-fill-paragraph--compile-dot-point-patterns'.
@@ -3130,6 +3375,7 @@ held out of the fill, see `fancy-fill-paragraph--lines-split-closer'."
                (prefix-info (fancy-fill-paragraph--analyze-fill-prefix beg end dp-list))
                (prefix (car prefix-info))
                (prefix-column-width (cadr prefix-info))
+               (first-prefix (or (nth 2 prefix-info) prefix))
                (`(,lines ,closer)
                 (fancy-fill-paragraph--lines-split-closer
                  (fancy-fill-paragraph--strip-region-lines beg end prefix-column-width) closer))
@@ -3147,7 +3393,7 @@ held out of the fill, see `fancy-fill-paragraph--lines-split-closer'."
     (let ((result
            (fancy-fill-paragraph--append-closer
             (and filled
-                 (mapconcat (lambda (line) (concat prefix line)) filled "\n"))
+                 (concat first-prefix (string-join filled (concat "\n" prefix))))
             closer prefix)))
       (when result
         (fancy-fill-paragraph--replace-region beg end result)))))
@@ -3192,7 +3438,12 @@ left alone, see `fancy-fill-paragraph--syntax-fill-jobs-in-range'."
   (let* ((bounds (fancy-fill-paragraph--paragraph-bounds))
          (beg (car bounds))
          (end (cdr bounds))
-         (jobs (fancy-fill-paragraph--syntax-fill-jobs-in-range beg end (point) sel-bounds)))
+         (jobs
+          ;; NOTE: a comment found by regexp on the line at point is its only
+          ;; job.  BEG..END may hold it as prose, or be a neighboring paragraph
+          ;; when its line separates paragraphs.
+          (or (fancy-fill-paragraph--regexp-comment-jobs-at sel-bounds)
+              (fancy-fill-paragraph--syntax-fill-jobs-in-range beg end (point) sel-bounds))))
     (cons
      (cond
       (jobs
@@ -3240,6 +3491,9 @@ With an active region, fill each paragraph in the region separately.
 Breaks lines preferring sentence boundaries.
 Return non-nil when the buffer was modified."
   (interactive "*")
+  ;; Set up the comment variables as `newcomment' does before using them,
+  ;; a mode may leave `comment-start-skip' unset for e.g.
+  (comment-normalize-vars t)
   (let ((changed
          (cond
           ;; NOTE: intentionally `region-active-p', not `use-region-p', so an

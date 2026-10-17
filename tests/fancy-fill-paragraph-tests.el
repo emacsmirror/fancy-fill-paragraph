@@ -1481,6 +1481,543 @@ never closes."
         (let ((inhibit-message t))
           (should-fill-same-from-every-position (nth 1 case) 1 (nth 2 case)))))))
 
+(ert-deftest fill-regexp-comment-org-keeps-prefix ()
+  "An Org comment fills as a line comment, keeping its `# ' prefix.
+Org's syntax table doesn't mark comments, so the comment was filled as
+prose: wrapped lines lost the prefix, becoming document text, a second
+line's `#' was joined into the text, and with prose around the comment
+a neighboring paragraph was filled instead.  The cursor on a blank line
+before the comment merged it into the prose before the blank line.
+A `# ' line in a source block is filled the same, a comment in the
+languages using `#' (Python and shell for e.g.)."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (org-mode)
+      (let ((inhibit-message t))
+        (dolist
+            (case
+             (list
+              (list
+               "# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               (list 0)
+               "# Jjj kkk lll mmm nnn ooo ppp\n# qqq rrr.\n")
+              (list
+               "# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n# Sss ttt.\n"
+               (list 0 1)
+               "# Jjj kkk lll mmm nnn ooo ppp\n# qqq rrr. Sss ttt.\n")
+              (list
+               "Aaa bbb.\n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\nSss ttt.\n"
+               (list 1)
+               "Aaa bbb.\n# Jjj kkk lll mmm nnn ooo ppp\n# qqq rrr.\nSss ttt.\n")
+              ;; A keyword before the comment isn't part of it.
+              (list
+               "#+TITLE: Aaa.\n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               (list 1)
+               "#+TITLE: Aaa.\n# Jjj kkk lll mmm nnn ooo ppp\n# qqq rrr.\n")
+              ;; Only the comment's paragraph at point fills.
+              (list
+               (concat
+                "# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+                "#\n"
+                "# Sss ttt uuu vvv www xxx yyy zzz.\n")
+               (list 2)
+               (concat
+                "# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+                "#\n"
+                "# Sss ttt uuu vvv www xxx yyy\n"
+                "# zzz.\n"))
+              (list
+               "- Aaa.\n  # Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               (list 1)
+               "- Aaa.\n  # Jjj kkk lll mmm nnn ooo\n  # ppp qqq rrr.\n")
+              (list
+               "#+begin_src python\n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n#+end_src\n"
+               (list 1)
+               "#+begin_src python\n# Jjj kkk lll mmm nnn ooo ppp\n# qqq rrr.\n#+end_src\n")
+              ;; A quote left open in the prose before it.
+              (list
+               "He said \"hi.\n\n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               (list 2)
+               "He said \"hi.\n\n# Jjj kkk lll mmm nnn ooo ppp\n# qqq rrr.\n")
+              ;; A blank line before it is left, as is the comment.
+              (list
+               "Aaa bbb.\n\n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               (list 1)
+               "Aaa bbb.\n\n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n")
+              (list
+               "Aaa bbb.\n   \n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               (list 1)
+               "Aaa bbb.\n   \n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n")))
+          (dolist (line-index (nth 1 case))
+            (should-fill-same-from-every-position (nth 0 case) line-index (nth 2 case))))
+        ;; A selection fills the comment as the cursor does.
+        (should-fill-selection
+         ;; format-next-line: off
+         (concat "Aaa bbb ccc ddd eee fff ggg hhh iii.\n"
+                 "# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+                 "Sss ttt uuu vvv www xxx yyy zzz.\n")
+         0
+         ;; format-next-line: off
+         (concat "Aaa bbb ccc ddd eee fff ggg\n"
+                 "hhh iii.\n"
+                 "# Jjj kkk lll mmm nnn ooo ppp\n"
+                 "# qqq rrr.\n"
+                 "Sss ttt uuu vvv www xxx yyy\n"
+                 "zzz.\n"))))))
+
+(define-derived-mode
+ fancy-fill-paragraph-test-regexp-comment-mode text-mode "Regexp-Comment"
+ "A prose mode whose `;' comments the syntax table doesn't mark.
+A stand-in for `org-mode', showing comments found by regexp don't
+depend on the mode."
+ (setq-local comment-start "; ") (setq-local comment-start-skip "^[ \t]*;+[ \t]*"))
+
+(ert-deftest fill-regexp-comment-any-mode-keeps-prefix ()
+  "A comment found by regexp fills as a comment in any mode."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (fancy-fill-paragraph-test-regexp-comment-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position
+         "Aaa bbb.\n;; Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n;; Sss ttt.\nUuu vvv.\n"
+         1
+         "Aaa bbb.\n;; Jjj kkk lll mmm nnn ooo ppp\n;; qqq rrr. Sss ttt.\nUuu vvv.\n")))))
+
+(ert-deftest fill-regexp-comment-lookalikes-fill-as-prose ()
+  "Text resembling a comment found by regexp that isn't one fills as prose.
+In `org-mode' `##' and a `#' within a line are text, and prose beside a
+comment fills without it, `##' continuing indented as Org fills it.  A
+quote within a quote in `mail-mode' keeps the mode's prefix, which is
+longer than the `>' `comment-start-skip' matches.  In `authinfo-mode' a
+`#' after text or escaped doesn't open the line with a comment."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'org-mode
+               "## Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "## Jjj kkk lll mmm nnn ooo ppp\n   qqq rrr.\n")
+              (list
+               #'org-mode
+               "Aaa # bbb ccc ddd eee fff ggg hhh iii jjj kkk.\n"
+               0
+               "Aaa # bbb ccc ddd eee fff ggg\nhhh iii jjj kkk.\n")
+              (list
+               #'org-mode
+               "Aaa bbb ccc ddd eee fff ggg hhh iii.\n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "Aaa bbb ccc ddd eee fff ggg\nhhh iii.\n# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n")
+              (list
+               #'mail-mode
+               "> > Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "> > Jjj kkk lll mmm nnn ooo\n> > ppp qqq rrr.\n")
+              (list
+               #'authinfo-mode
+               "x# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "x# Jjj kkk lll mmm nnn ooo ppp\nqqq rrr.\n")
+              (list
+               #'authinfo-mode
+               "\\# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "\\# Jjj kkk lll mmm nnn ooo ppp\nqqq rrr.\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) (nth 2 case) (nth 3 case)))))))
+
+(ert-deftest fill-regexp-comment-other-modes-keeps-prefix ()
+  "A line comment the syntax table doesn't mark keeps its prefix, in any mode.
+In `authinfo-mode' and `makefile-imake-mode' the comment is only known
+to font-lock and `comment-start', so it was filled as prose, wrapped
+lines losing the prefix and becoming data, and the text around the
+comment was joined to it.  A quote in `mail-mode' is found the same
+way, with prose beside it the quote was joined to the prose.  An
+indented comment keeps its indentation and delimiter.  The expected
+results for `authinfo-mode' match its own `fill-paragraph'."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist
+        (case
+         (list
+          (list
+           #'authinfo-mode
+           "# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+           0
+           "# Jjj kkk lll mmm nnn ooo ppp\n# qqq rrr.\n")
+          (list
+           #'authinfo-mode
+           (concat
+            "machine aaa login bbb\n"
+            "# Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+            "machine ccc login ddd\n")
+           1
+           (concat
+            "machine aaa login bbb\n"
+            "# Jjj kkk lll mmm nnn ooo ppp\n"
+            "# qqq rrr.\n"
+            "machine ccc login ddd\n"))
+          (list
+           #'authinfo-mode
+           " # Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+           0
+           " # Jjj kkk lll mmm nnn ooo ppp\n # qqq rrr.\n")
+          (list
+           #'authinfo-mode
+           "  ## Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+           0
+           "  ## Jjj kkk lll mmm nnn ooo\n  ## ppp qqq rrr.\n")
+          (list
+           #'makefile-imake-mode
+           "XCOMM Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+           0
+           "XCOMM Jjj kkk lll mmm nnn ooo\nXCOMM ppp qqq rrr.\n")
+          (list
+           #'makefile-imake-mode
+           "FOO = 1\nXCOMM Jjj kkk lll mmm nnn ooo ppp qqq rrr.\nBAR = 2\n"
+           1
+           "FOO = 1\nXCOMM Jjj kkk lll mmm nnn ooo\nXCOMM ppp qqq rrr.\nBAR = 2\n")
+          (list
+           #'mail-mode
+           "> Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+           0
+           "> Jjj kkk lll mmm nnn ooo ppp\n> qqq rrr.\n")
+          (list
+           #'mail-mode
+           "Aaa bbb.\n> Jjj kkk lll mmm nnn ooo ppp qqq rrr.\nSss ttt.\n"
+           1
+           "Aaa bbb.\n> Jjj kkk lll mmm nnn ooo ppp\n> qqq rrr.\nSss ttt.\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) (nth 2 case) (nth 3 case))
+          ;; A selection fills it as the cursor does, the comment's line is
+          ;; part of a prose paragraph.
+          (should-fill-selection (nth 1 case) 0 (nth 3 case)))))))
+
+(ert-deftest fill-regexp-comment-dot-point-keeps-prefix ()
+  "A comment found by regexp holding a dot-point continues under its text.
+Where the mode's adaptive fill prefix takes in a dot-point after the
+delimiter (`> - ' in `mail-mode' for e.g.), the item's line wasn't
+taken for a comment, so the prose fill repeated the dot-point on the
+wrapped line and joined the next item to it.  A prefix the line doesn't
+start with, a prefix short of the delimiter (indentation alone for
+e.g.), an item without text and a longer delimiter are left as they
+were."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist
+        (case
+         (list
+          (list
+           #'mail-mode
+           (concat
+            "> Aaa bbb ccc ddd eee fff ggg hhh.\n"
+            "> - Iii jjj kkk lll mmm nnn ooo ppp qqq.\n"
+            "> - Rrr sss.\n")
+           '(0 1 2)
+           (concat
+            "> Aaa bbb ccc ddd eee fff ggg\n"
+            "> hhh.\n"
+            "> - Iii jjj kkk lll mmm nnn\n"
+            ">   ooo ppp qqq.\n"
+            "> - Rrr sss.\n"))
+          (list
+           #'mail-mode
+           "> * Iii jjj kkk lll mmm nnn ooo ppp qqq.\n> * Rrr sss.\n"
+           '(0 1)
+           "> * Iii jjj kkk lll mmm nnn\n>   ooo ppp qqq.\n> * Rrr sss.\n")
+          (list
+           #'mail-mode
+           "Aaa bbb.\n> - Iii jjj kkk lll mmm nnn ooo ppp qqq.\n> - Rrr sss.\n"
+           '(1 2)
+           "Aaa bbb.\n> - Iii jjj kkk lll mmm nnn\n>   ooo ppp qqq.\n> - Rrr sss.\n")
+          (list
+           #'authinfo-mode
+           "# - Iii jjj kkk lll mmm nnn ooo ppp qqq.\n# - Rrr sss.\n"
+           '(0 1)
+           "# - Iii jjj kkk lll mmm nnn\n#   ooo ppp qqq.\n# - Rrr sss.\n")
+          ;; Unchanged, the mode's adaptive fill prefix stops before the
+          ;; dot-point.
+          (list
+           #'mail-mode
+           "> 1. Iii jjj kkk lll mmm nnn ooo ppp qqq.\n> 2. Rrr sss.\n"
+           '(0 1)
+           "> 1. Iii jjj kkk lll mmm nnn\n>    ooo ppp qqq.\n> 2. Rrr sss.\n")
+          (list
+           #'org-mode
+           "# Aaa bbb ccc ddd eee fff ggg hhh.\n# - Iii jjj kkk lll mmm nnn ooo ppp qqq.\n"
+           '(0 1)
+           (concat
+            "# Aaa bbb ccc ddd eee fff ggg\n"
+            "# hhh.\n"
+            "# - Iii jjj kkk lll mmm nnn\n"
+            "#   ooo ppp qqq.\n"))
+          ;; Unchanged, `rst-mode' continues a comment by indentation.
+          (list
+           #'rst-mode
+           ".. - Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+           '(0)
+           ".. - Jjj kkk lll mmm nnn ooo\n     ppp qqq rrr.\n")
+          ;; Unchanged, a prefix of indentation alone continues the line
+          ;; as it does without the dot-point.
+          (list
+           (lambda ()
+             (fancy-fill-paragraph-test-regexp-comment-mode)
+             (setq-local adaptive-fill-regexp "[ \t]*"))
+           "  ;; - Iii jjj kkk lll mmm nnn ooo ppp qqq.\n"
+           '(0)
+           "  ;; - Iii jjj kkk lll mmm nnn\n  ooo ppp qqq.\n")
+          ;; Unchanged, the item without text keeps its dot-point.
+          (list
+           #'mail-mode
+           "> Aaa bbb ccc ddd eee fff ggg hhh.\n> - \n> Rrr sss.\n"
+           '(0)
+           "> Aaa bbb ccc ddd eee fff ggg\n> hhh.\n> - \n> Rrr sss.\n")
+          ;; Unchanged, a quote within a quote isn't the delimiter.
+          (list
+           #'mail-mode
+           "> > Aaa bbb ccc ddd eee fff ggg hhh.\n> > - Iii jjj kkk lll mmm nnn ooo ppp qqq.\n"
+           '(0 1)
+           (concat
+            "> > Aaa bbb ccc ddd eee fff\n"
+            "> > ggg hhh.\n"
+            "> > - Iii jjj kkk lll mmm nnn\n"
+            "> >   ooo ppp qqq.\n"))))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (dolist (line-index (nth 2 case))
+            (should-fill-same-from-every-position (nth 1 case) line-index (nth 3 case)))
+          (should-fill-selection (nth 1 case) 0 (nth 3 case)))))))
+
+(ert-deftest fill-regexp-comment-selection-fills-each-once ()
+  "A selection fills prose and each comment found by regexp in it once.
+The paragraph's prose was filled again from each of its lines, as its
+comment lines must still be filled, taking time quadratic in its length
+\(over a minute for 400 lines).  The prose is filled once, however many
+comments it holds, and each comment once, however many lines it has,
+filled as the cursor fills it.  With `fancy-fill-paragraph-syntax-bounds'
+nil the comments are prose, filled with the rest at once."
+  (let ((fill-column 30)
+        (sentence-end-double-space nil)
+        (text-alternating
+         (apply #'concat (make-list 10 ";; Jjj kkk lll mmm nnn ooo ppp qqq rrr.\nAaa bbb.\n"))))
+    (with-temp-buffer
+      (fancy-fill-paragraph-test-regexp-comment-mode)
+      (let ((inhibit-message t))
+        ;; Each case is (SYNTAX-BOUNDS TEXT-INITIAL TEXT-EXPECTED COMMENT-FILL-COUNT),
+        ;; TEXT-EXPECTED nil to check the counts only.
+        (dolist
+            (case
+             (list
+              (list
+               t
+               (concat ";; Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+                       (apply #'concat (make-list 10 "Aaa bbb.\n"))
+                       ";; Sss ttt uuu vvv www xxx yyy zzz.\n"
+                       (apply #'concat (make-list 10 "Ccc ddd.\n")))
+               ;; format-next-line: off
+               (concat ";; Jjj kkk lll mmm nnn ooo ppp\n"
+                       ";; qqq rrr.\n"
+                       "Aaa bbb. Aaa bbb. Aaa bbb.\n"
+                       "Aaa bbb. Aaa bbb. Aaa bbb.\n"
+                       "Aaa bbb. Aaa bbb. Aaa bbb.\n"
+                       "Aaa bbb.\n"
+                       ";; Sss ttt uuu vvv www xxx yyy\n"
+                       ";; zzz.\n"
+                       "Ccc ddd. Ccc ddd. Ccc ddd.\n"
+                       "Ccc ddd. Ccc ddd. Ccc ddd.\n"
+                       "Ccc ddd. Ccc ddd. Ccc ddd.\n"
+                       "Ccc ddd.\n")
+               2)
+              ;; Comments and prose alternate, a reply between quoted lines for e.g.
+              (list
+               t
+               text-alternating
+               (apply #'concat
+                      (make-list 10 ";; Jjj kkk lll mmm nnn ooo ppp\n;; qqq rrr.\nAaa bbb.\n"))
+               10)
+              ;; A comment of many lines.
+              (list
+               t
+               (concat (apply #'concat (make-list 4 "Aaa bbb\n"))
+                       (apply #'concat (make-list 6 ";; Jjj kkk lll\n"))
+                       (apply #'concat (make-list 4 "Ccc ddd\n")))
+               ;; format-next-line: off
+               (concat "Aaa bbb Aaa bbb Aaa bbb Aaa\n"
+                       "bbb\n"
+                       ";; Jjj kkk lll Jjj kkk lll Jjj\n"
+                       ";; kkk lll Jjj kkk lll Jjj kkk\n"
+                       ";; lll Jjj kkk lll\n"
+                       "Ccc ddd Ccc ddd Ccc ddd Ccc\n"
+                       "ddd\n")
+               1)
+              (list
+               nil
+               text-alternating
+               nil
+               0)))
+          (let ((fancy-fill-paragraph-syntax-bounds (nth 0 case))
+                (prose-fill-count 0)
+                (comment-fill-count 0))
+            (with-advice (('fancy-fill-paragraph--fill-prose-region
+                           :before
+                           (lambda (&rest _)
+                             (setq prose-fill-count (1+ prose-fill-count))))
+                          ('fancy-fill-paragraph--fill-line-comment-region
+                           :before
+                           (lambda (&rest _)
+                             (setq comment-fill-count (1+ comment-fill-count)))))
+              (buffer-reset-text (nth 1 case))
+              (let ((transient-mark-mode t))
+                (set-mark (point-min))
+                (goto-char (point-max))
+                (activate-mark)
+                (fancy-fill-paragraph)))
+            (when (nth 2 case)
+              (should (equal (nth 2 case) (buffer-string))))
+            (should (= prose-fill-count 1))
+            (should (= comment-fill-count (nth 3 case)))))))))
+
+(ert-deftest fill-adaptive-indent-continuation ()
+  "A line the mode's adaptive fill continues indented under its text fills so.
+An `rst-mode' comment or directive, and an `org-mode' list item, wrapped
+to column 0, which ends an `rst-mode' comment or directive, so its text
+became document text.  The expected results match each mode's own
+`fill-paragraph'."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'rst-mode
+               ".. Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               ".. Jjj kkk lll mmm nnn ooo ppp\n   qqq rrr.\n")
+              (list
+               #'rst-mode
+               "Aaa bbb.\n\n.. Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n\nSss ttt.\n"
+               2
+               "Aaa bbb.\n\n.. Jjj kkk lll mmm nnn ooo ppp\n   qqq rrr.\n\nSss ttt.\n")
+              (list
+               #'rst-mode
+               ".. note:: Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               ".. note:: Jjj kkk lll mmm nnn\n          ooo ppp qqq rrr.\n")
+              (list
+               #'org-mode
+               "1) Aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk.\n"
+               0
+               "1) Aaa bbb ccc ddd eee fff ggg\n   hhh iii jjj kkk.\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) (nth 2 case) (nth 3 case)))))))
+
+(ert-deftest fill-adaptive-own-prefix-fills-as-before ()
+  "A line whose adaptive fill prefix is its own fills as it did.
+The prefix `fill-context-prefix' gives for a line on its own is
+blank-space as wide as the line's prefix, that isn't the mode continuing
+it indented, see `fill-adaptive-indent-continuation'.  A dot-point and an
+indented line in `text-mode' fill as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 30)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (text-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list
+                   "- Aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk.\n"
+                   "- Aaa bbb ccc ddd eee fff ggg\n  hhh iii jjj kkk.\n")
+                  (list
+                   "1. Aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk.\n"
+                   "1. Aaa bbb ccc ddd eee fff ggg\n   hhh iii jjj kkk.\n")
+                  (list
+                   "   Aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk.\n"
+                   "   Aaa bbb ccc ddd eee fff ggg\n   hhh iii jjj kkk.\n")))
+          (should-fill-same-from-every-position (nth 0 case) 0 (nth 1 case)))))))
+
+(ert-deftest fill-line-comment-word-delimiter-keeps-prefix ()
+  "A line comment opened by a word keeps the whole word on wrapped lines.
+Only the delimiter's first character was repeated (`r' for `rem' in
+`bat-mode', `@' for `@c' in `texinfo-mode'), so wrapped lines were no
+longer comments.  Fortran's `!' keeps its prefix, its regexp opening
+with an empty group (see `comment-search-forward') and matching a
+repeated character after the opener in either case.  A word starting
+with a doubled letter (`!aardvark', `!Oops' and a fixed-form `Cooling')
+is the comment's text, not part of the delimiter, while a run of
+punctuation after `!' is.  The expected result for `bat-mode' matches
+its own `fill-paragraph'."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'bat-mode
+               "rem Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "rem Jjj kkk lll mmm nnn ooo\nrem ppp qqq rrr.\n")
+              (list
+               #'texinfo-mode
+               "@c Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "@c Jjj kkk lll mmm nnn ooo ppp\n@c qqq rrr.\n")
+              (list
+               #'fortran-mode
+               "! Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "! Jjj kkk lll mmm nnn ooo ppp\n! qqq rrr.\n")
+              (list
+               #'fortran-mode
+               "!aardvark jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "!aardvark jjj kkk lll mmm nnn\n!ooo ppp qqq rrr.\n")
+              (list
+               #'fortran-mode
+               "!Oops jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "!Oops jjj kkk lll mmm nnn ooo\n!ppp qqq rrr.\n")
+              (list
+               #'fortran-mode
+               "!Zzz jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "!Zzz jjj kkk lll mmm nnn ooo\n!ppp qqq rrr.\n")
+              (list
+               #'fortran-mode
+               "Cooling jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "Cooling jjj kkk lll mmm nnn\nCooo ppp qqq rrr.\n")
+              (list
+               #'fortran-mode
+               "x = 1 !Oops jjj kkk lll mmm nnn ooo ppp qqq.\n"
+               0
+               "x = 1 !Oops jjj kkk lll mmm\n      !nnn ooo ppp qqq.\n")
+              (list
+               #'fortran-mode
+               "!-- Jjj kkk lll mmm nnn ooo ppp qqq rrr.\n"
+               0
+               "!-- Jjj kkk lll mmm nnn ooo\n!-- ppp qqq rrr.\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        ;; Set after the mode, `texinfo-mode' sets its own.
+        (setq-local fill-column 30)
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) (nth 2 case) (nth 3 case)))))))
+
 (ert-deftest fill-syntax-bounds-region-unclosed-block-comment ()
   "Selecting a block comment that never closes fills it as a block comment.
 It had no job of its own, so it was left alone, while the cursor filled
