@@ -324,23 +324,6 @@ with different blank-space, tabs against spaces for instance."
   (declare (important-return-value t))
   (string-match-p "\\`[ \t\n]*\\'" str))
 
-(defsubst fancy-fill-paragraph--empty-syntax-region-p (beg end)
-  "Return non-nil if the syntax region BEG..END has no fillable content.
-True when the delimiters are on separate lines and the opener line
-contains only the delimiter (no text after it), with or without
-leading indentation."
-  (declare (important-return-value t))
-  (and (< beg (fancy-fill-paragraph--last-bol end))
-       (save-excursion
-         (goto-char beg)
-         ;; Leading indentation first: BEG is a line beginning, so an
-         ;; indented opener otherwise leaves the non-blank skip below
-         ;; consuming nothing and the delimiter misread as content.
-         (skip-chars-forward " \t" (pos-eol))
-         (skip-chars-forward "^ \t\n" (pos-eol))
-         (skip-chars-forward " \t" (pos-eol))
-         (eolp))))
-
 (defsubst fancy-fill-paragraph--strip-indent (line n)
   "Strip up to N leading blank characters from LINE.
 A line indented less than N keeps its text."
@@ -1138,12 +1121,6 @@ by column and would delete or distort a mismatched delimiter."
                        (= (ppss-comment-or-string-start ppss) comment-pos)))
                 comment-pos)))))
 
-(defun fancy-fill-paragraph--line-comment-at-col-p (indent-col delim-str)
-  "Return non-nil when the current line has a line comment at INDENT-COL.
-DELIM-STR is the expected delimiter run."
-  (declare (important-return-value t))
-  (not (null (fancy-fill-paragraph--line-comment-pos-at-col indent-col delim-str))))
-
 (defun fancy-fill-paragraph--line-comment-fill-beg (comment-pos)
   "Return the fill start for the line comment at COMMENT-POS.
 When non-blank code precedes the comment opener, start at COMMENT-POS;
@@ -1297,6 +1274,7 @@ overlapping that selection.  Otherwise fill the paragraph at point."
                   (first-prefix (plist-get prefix-info :first-prefix))
                   (prefix-col (plist-get prefix-info :prefix-col)))
              (fancy-fill-paragraph--fill-prefixed-region para-beg para-end prefix prefix-col
+                                                         nil
                                                          first-prefix))))))))
 
 (defun fancy-fill-paragraph--line-comment-syntax-start-p (syn-start)
@@ -1727,15 +1705,14 @@ COMMENT-START-POS is the buffer position of the comment opener."
      " "))))
 
 (defun fancy-fill-paragraph--block-comment-continuation-prefix
-    (beg body closer-bol opener-col comment-start-pos)
+    (beg closer-bol opener-col comment-start-pos)
   "Return the full continuation prefix for a block comment.
-BEG is the region start, BODY is the body bounds, the closer line's for
-a comment on two lines, or nil on one line.  CLOSER-BOL starts the closer
-line or nil, OPENER-COL is the opener column, and COMMENT-START-POS is
-the comment opener position.
-The indentation is read from the first non-blank body line, the closer
-line when the body lines are all blank, the opener line for a comment
-on one line.
+BEG is the region start, CLOSER-BOL starts the closer line or nil,
+OPENER-COL is the opener column, and COMMENT-START-POS is the comment
+opener position.
+The indentation is read from the first non-blank line after the opener
+line, the closer line when the lines between are all blank, the opener
+line for a comment on one line.
 NOTE: the opener line's indentation is only its leading blank-space,
 padded with spaces to OPENER-COL.  With code before the opener, a line
 indented with tabs isn't laid out that way, so its prefix wouldn't match.
@@ -1744,10 +1721,10 @@ So any later line is preferred to it."
   (concat
    (fancy-fill-paragraph--extract-body-indent
     (cond
-     ;; A body implies a closer line, checking both is paranoid.
-     ((and body closer-bol)
+     (closer-bol
       (save-excursion
-        (goto-char (car body))
+        (goto-char beg)
+        (forward-line 1)
         ;; Blank lines hold no indentation to read.
         (while (and (< (point) closer-bol) (looking-at-p "[ \t]*$"))
           (forward-line 1))
@@ -1756,6 +1733,15 @@ So any later line is preferred to it."
       beg))
     opener-col)
    (fancy-fill-paragraph--block-comment-continuation-suffix comment-start-pos)))
+
+(defsubst fancy-fill-paragraph--line-blank-past-column-p (col)
+  "Return non-nil when the line at point is blank past column COL.
+Such a line separates the paragraphs of a body whose prefix is COL
+columns wide, holding the prefix alone (` *' for e.g.) or nothing."
+  (declare (important-return-value t))
+  (save-excursion
+    (move-to-column col)
+    (looking-at-p "[ \t]*$")))
 
 (defun fancy-fill-paragraph--block-comment-paragraph-prefixed-p (para-beg para-end cont-prefix)
   "Return non-nil when a line of the paragraph PARA-BEG..PARA-END has CONT-PREFIX.
@@ -1810,9 +1796,7 @@ the prefix (` * ****' for e.g.), so it's left as it is."
           (mark-run-re (fancy-fill-paragraph--mark-run-regexp (string-trim (or cont-prefix "")))))
       (while (and (not done) (<= (point) body-end))
         (let ((separator-p
-               (or (save-excursion
-                     (move-to-column prefix-col)
-                     (looking-at-p "[ \t]*$"))
+               (or (fancy-fill-paragraph--line-blank-past-column-p prefix-col)
                    (and mark-run-re
                         (save-excursion
                           (goto-char (pos-bol))
@@ -1865,27 +1849,6 @@ too, the longer of the two taken."
                  (string-equal end-str (buffer-substring-no-properties end-beg closer-end)))
         (goto-char end-beg)))
     (point)))
-
-(defun fancy-fill-paragraph--closer-word (closer-kind closer-end limit)
-  "Return the closer ending at CLOSER-END when it's a word of its own, or nil.
-CLOSER-KIND is how the closer line is filled, see
-`fancy-fill-paragraph--closer-line-kind', only a closer joining the
-last paragraph is returned.  LIMIT bounds the closer's start.  Closing
-delimiters glued to the closer move with it as one word, see
-`fancy-fill-paragraph--code-after-closer-p'.  Glued to text, the closer
-is part of a word, filled as one.
-NOTE: only a space separates it, as in the text, where a tab is part of
-a word."
-  (declare (important-return-value t))
-  (and (eq closer-kind 'joins)
-       closer-end
-       (save-excursion
-         (let ((closer-beg (fancy-fill-paragraph--closer-delimiter-beg closer-end limit)))
-           (goto-char closer-end)
-           (skip-syntax-forward ")." (pos-eol))
-           (and (< closer-beg closer-end)
-                (eq (char-before closer-beg) ?\s)
-                (buffer-substring-no-properties closer-beg (point)))))))
 
 (defun fancy-fill-paragraph--closer-alone-prefix (cont-prefix closer)
   "Return the prefix of a line holding CLOSER alone, after CONT-PREFIX lines.
@@ -1977,17 +1940,17 @@ the opener and any code before it (`int x; /* */' for e.g.)."
          filled "\n" (fancy-fill-paragraph--closer-alone-prefix cont-prefix closer) closer)))))))
 
 (defun fancy-fill-paragraph--fill-prefixed-paragraph
-    (lines replace-beg replace-end cont-prefix &optional first-prefix prefix-col closer)
+    (lines replace-beg replace-end cont-prefix prefix-col &optional first-prefix closer)
   "Fill LINES with CONT-PREFIX and replace REPLACE-BEG..REPLACE-END.
 FIRST-PREFIX, when non-nil, is used on the first output line instead
 of CONT-PREFIX (e.g. for a comment opener like \"/* \").
-PREFIX-COL, when non-nil, is the buffer-measured width of CONT-PREFIX.
+PREFIX-COL is the column text starts at after CONT-PREFIX, which starts
+its line, the fill width being `fill-column' less it.
 CLOSER, when non-nil, is a comment or string closer ending LINES, held
 out of the fill, see `fancy-fill-paragraph--lines-split-closer'.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
   (pcase-let* ((`(,lines ,closer) (fancy-fill-paragraph--lines-split-closer lines closer))
-               (prefix-col (or prefix-col (string-width cont-prefix)))
                ;; FIRST-PREFIX starts at REPLACE-BEG, lay it out from there,
                ;; so code before a trailing comment's opener is counted too.
                ;; A narrower FIRST-PREFIX leaves the first line as wide as the others.
@@ -2008,25 +1971,6 @@ Returns non-nil when the buffer was modified."
                (result (fancy-fill-paragraph--append-closer result closer cont-prefix)))
     (when result
       (fancy-fill-paragraph--replace-region replace-beg replace-end result))))
-
-(defun fancy-fill-paragraph--fill-syntax-region
-    (beg end inner-body multiline-fn inline-fn &optional opener-text)
-  "Dispatch filling of a syntax region based on its structure.
-BEG and END are the full region bounds.  INNER-BODY is the raw body
-bounds from `--comment-or-string-body-bounds', or nil.
-OPENER-TEXT, when non-nil, is the text after the opener on its line,
-so the region is never empty (a word glued to the opener for e.g.).
-When INNER-BODY is non-nil, call MULTILINE-FN with no arguments.
-When the region is empty (delimiter-only), return nil.
-Otherwise call INLINE-FN with no arguments."
-  (declare (important-return-value t))
-  (cond
-   (inner-body
-    (funcall multiline-fn))
-   ((and (null opener-text) (fancy-fill-paragraph--empty-syntax-region-p beg end))
-    nil)
-   (t
-    (funcall inline-fn))))
 
 (defun fancy-fill-paragraph--fill-body-paragraphs
     (body-beg body-end prefix-col sel-beg sel-end para-fill-fn &optional cont-prefix)
@@ -2049,16 +1993,20 @@ Returns non-nil when any paragraph changed."
     changed))
 
 (defun fancy-fill-paragraph--fill-prefixed-region
-    (beg end cont-prefix prefix-col &optional first-prefix first-line-text replace-beg closer)
+    (beg end cont-prefix prefix-col &optional closer first-prefix first-line-text replace-beg)
   "Strip lines from BEG..END, fill with CONT-PREFIX, and replace the region.
-PREFIX-COL is the width of CONT-PREFIX, the columns stripped from each
-line (e.g. line comments may strip fewer columns than the literal
-prefix string occupies).  When FIRST-LINE-TEXT is non-nil it is
-prepended as the first line (e.g. opener-line body text).
+Lines are stripped of CONT-PREFIX width columns.  When FIRST-LINE-TEXT
+is non-nil it is prepended as the first line (e.g. opener-line body text).
 FIRST-PREFIX, when non-nil, is used on the first output line.
 REPLACE-BEG, when non-nil, overrides BEG as the replacement start
-\(e.g. to include the opener line in the replaced span).
-CLOSER is passed to `fancy-fill-paragraph--fill-prefixed-paragraph'.
+\(e.g. to include the opener line in the replaced span).  A nil BEG has
+no lines to strip, FIRST-LINE-TEXT is filled alone and REPLACE-BEG
+starts the replacement (a comment or string on one line for e.g.).
+PREFIX-COL is the width of CONT-PREFIX, the columns stripped from each
+line (line comments may strip fewer columns than the literal prefix
+string occupies for e.g.).
+CLOSER, when non-nil, is a comment or string closer ending the region,
+see `fancy-fill-paragraph--fill-prefixed-paragraph'.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
   (let* ( ;; FIRST-LINE-TEXT supplies the opener line, so every line in the
@@ -2067,18 +2015,18 @@ Returns non-nil when the buffer was modified."
          ;; was read from the buffer, so neither may be matched literally.
          (cont-prefix-literal (and first-line-text cont-prefix))
          (lines
-          (fancy-fill-paragraph--strip-region-lines beg (min (1+ end) (point-max)) prefix-col
-                                                    cont-prefix-literal))
+          (and beg
+               (fancy-fill-paragraph--strip-region-lines beg (min (1+ end) (point-max)) prefix-col
+                                                         cont-prefix-literal)))
          (lines
           (cond
            (first-line-text
             (cons first-line-text lines))
            (t
             lines))))
-    (fancy-fill-paragraph--fill-prefixed-paragraph lines (or replace-beg beg) end cont-prefix
-                                                   first-prefix
-                                                   prefix-col
-                                                   closer)))
+    (fancy-fill-paragraph--fill-prefixed-paragraph
+     lines (or replace-beg beg) end cont-prefix prefix-col
+     first-prefix closer)))
 
 (defun fancy-fill-paragraph--string-continuation-prefix
     (body-beg closer-bol closer-kind &optional opener-hang opener-col)
@@ -2143,9 +2091,11 @@ the doc-string.  Otherwise the closer may be less indented than the text
        (t
         (or body-indent closer-indent ""))))))
 
-(defun fancy-fill-paragraph--fill-multiline-syntax-body
+(defun fancy-fill-paragraph--fill-syntax-body
     (beg
+     end
      inner-body
+     closer-bol
      cont-prefix
      opener-prefix
      opener-text
@@ -2153,66 +2103,111 @@ the doc-string.  Otherwise the closer may be less indented than the text
      sel-beg
      sel-end
      &optional
-     closer-line-end
-     closer
-     para-keep-fn)
-  "Fill paragraphs in a multi-line syntax region, merging opener text.
-BEG is `pos-bol' of the opener line.  INNER-BODY is (BODY-BEG . BODY-END)
-for the lines between opener and closer.  CONT-PREFIX is the continuation
-prefix for body lines.  OPENER-PREFIX is the first-line prefix when the
-opener carries text (e.g. \"/* \"), or nil.  OPENER-TEXT is the body text
-on the opener line (e.g. \"Only flush\"), or nil.
+     closer-kind
+     para-keep-fn
+     closer-end)
+  "Fill paragraphs in a comment or string region, merging opener text.
+BEG is `pos-bol' of the opener line, END is `pos-eol' of the closer line.
+INNER-BODY is (BODY-BEG . BODY-END) for the lines between opener and
+closer, or nil when there are none.  CLOSER-BOL is the beginning of the
+closer line, or nil on one line, see
+`fancy-fill-paragraph--closer-line-bol'.  CONT-PREFIX is the continuation
+prefix for body lines, starting its line.
+OPENER-PREFIX is the first-line prefix when the opener carries text
+\(e.g. \"/* \"), or nil.  OPENER-TEXT is the body text on the opener line
+\(e.g. \"Only flush\"), or nil.
 PARA-FILL-FN is called as (PARA-FILL-FN PARA-BEG PARA-END CLOSER) for
 each non-opener paragraph, CLOSER being the closer for the paragraph
-ending with it, otherwise nil.  SEL-BEG and SEL-END restrict filling to
+ending with it, when it's a word of its own, otherwise nil, see
+`fancy-fill-paragraph--fill-prefixed-paragraph'.  SEL-BEG and SEL-END
+restrict filling to
 overlapping paragraphs (callers should default to point when not
 region-restricted).
-CLOSER-LINE-END, when non-nil, is the end of a closer line carrying
-text, which then joins the last paragraph.  CLOSER, when non-nil, is
-the closer as a word of its own, held out of the last paragraph's fill,
-see `fancy-fill-paragraph--closer-word'.
+CLOSER-KIND is how the closer line is filled, see
+`fancy-fill-paragraph--closer-line-kind', text on it joining the last
+paragraph when `joins', otherwise the closer line stays as it is.  A
+region on one line is left alone then, its only line being the closer
+line.  For a comment that never closes it's `unclosed', the last line
+holding no closer, it's filled as the others are.
 PARA-KEEP-FN, when non-nil, is called as (PARA-KEEP-FN PARA-BEG PARA-END)
-for each paragraph, which is left as it is when it returns non-nil.
+for each paragraph, the opener's included, leaving it as it is when it
+returns non-nil.
+CLOSER-END follows the closer, closing delimiters glued to it moving
+with it as one word, see `fancy-fill-paragraph--code-after-closer-p'.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
-  (let* ( ;; NOTE: the prefix starts its line, as filled lines do, so it's
-         ;; measured alone.  Measured on the first body line, a line not
-         ;; starting with the prefix (blank-space or text indented with a
-         ;; tab for e.g.) gave another width.
-         (prefix-col (fancy-fill-paragraph--string-column-width cont-prefix))
-         ;; Widen body to include the opener line when it carries text,
-         ;; so paragraph detection sees it as part of the first paragraph.
-         ;; The closer line is taken in likewise, as the inline fill does,
-         ;; otherwise filling a comment once it wraps past two lines drops
-         ;; its last line from the paragraph and breaks the rest again.
-         (scan-beg
-          (cond
-           (opener-text
-            beg)
-           (t
-            (car inner-body))))
-         (scan-end (or closer-line-end (cdr inner-body))))
-    (fancy-fill-paragraph--fill-body-paragraphs
-     scan-beg
-     scan-end
-     prefix-col
-     sel-beg
-     sel-end
-     (lambda (para-beg para-end)
-       (let ((para-closer
-              (and closer-line-end (= para-end scan-end) closer)))
-         (cond
-          ((and para-keep-fn (funcall para-keep-fn para-beg para-end))
-           nil)
-          ;; First paragraph includes the opener line: merge opener
-          ;; text with body lines using the opener prefix for line 1.
-          ((and opener-text (= para-beg beg))
-           (fancy-fill-paragraph--fill-prefixed-region
-            (car inner-body) para-end cont-prefix prefix-col
-            opener-prefix opener-text beg para-closer))
-          (t
-           (funcall para-fill-fn para-beg para-end para-closer)))))
-     cont-prefix)))
+  (let ((closer-joins (memq closer-kind '(joins unclosed))))
+    (cond
+     ;; On one line, code after the closer would be filled with the text,
+     ;; without text after the opener there's nothing to fill.
+     ((and (null closer-bol) (not (and closer-joins opener-text)))
+      nil)
+     (t
+      (let* ((opener-eol
+              (save-excursion
+                (goto-char beg)
+                (pos-eol)))
+             ;; Without lines between the opener and closer the body is empty,
+             ;; starting on the closer line and ending before it.  A region on
+             ;; one line has no body, only the opener line's text.
+             (body-beg (or (car inner-body) closer-bol))
+             (body-end (or (cdr inner-body) opener-eol))
+             ;; NOTE: the prefix starts its line, as filled lines do, so it's
+             ;; measured alone.  Measured on the first body line, blank-space
+             ;; there that isn't the start of the prefix gave another width,
+             ;; as did code before the opener on one line.
+             (prefix-col (fancy-fill-paragraph--string-column-width cont-prefix))
+             ;; Widen body to include the opener line when it carries text,
+             ;; so paragraph detection sees it as part of the first paragraph.
+             ;; Likewise the closer line when its text joins the last paragraph.
+             (scan-beg
+              (cond
+               (opener-text
+                beg)
+               (t
+                body-beg)))
+             (scan-end
+              (cond
+               (closer-joins
+                end)
+               (t
+                body-end)))
+             ;; The closer when it's a word of its own, glued to text it's
+             ;; part of a word, filled as one.
+             ;; NOTE: only a space separates it, as in the text, where a
+             ;; tab is part of a word.
+             (closer
+              (and (eq closer-kind 'joins)
+                   closer-end
+                   (save-excursion
+                     (let ((closer-beg
+                            (fancy-fill-paragraph--closer-delimiter-beg closer-end beg)))
+                       (goto-char closer-end)
+                       (skip-syntax-forward ")." (pos-eol))
+                       (and (< closer-beg closer-end)
+                            (eq (char-before closer-beg) ?\s)
+                            (buffer-substring-no-properties closer-beg (point))))))))
+        (fancy-fill-paragraph--fill-body-paragraphs
+         scan-beg
+         scan-end
+         prefix-col
+         sel-beg
+         sel-end
+         (lambda (para-beg para-end)
+           (let ((para-closer
+                  (and (= para-end scan-end) closer)))
+             (cond
+              ((and para-keep-fn (funcall para-keep-fn para-beg para-end))
+               nil)
+              ;; First paragraph includes the opener line: merge opener
+              ;; text with body lines using the opener prefix for line 1.
+              ((and opener-text (= para-beg beg))
+               (fancy-fill-paragraph--fill-prefixed-region
+                body-beg para-end cont-prefix prefix-col
+                para-closer opener-prefix opener-text beg))
+              (t
+               (funcall para-fill-fn para-beg para-end para-closer)))))
+         cont-prefix))))))
 
 (defun fancy-fill-paragraph--fill-block-comment-body
     (body-beg body-end cont-prefix &optional closer)
@@ -2232,8 +2227,8 @@ otherwise as prose."
                                                       body-beg
                                                       (min (1+ body-end) (point-max)) prefix-col
                                                       cont-prefix)
-                                                     body-beg body-end cont-prefix
-                                                     nil prefix-col closer)))
+                                                     body-beg body-end cont-prefix prefix-col
+                                                     nil closer)))
    (t
     ;; Prefix doesn't match body lines (e.g. XML comments),
     ;; fall back to standard fill.
@@ -2257,40 +2252,27 @@ Point should be at the position where body content would begin.
 (defun fancy-fill-paragraph--block-comment-opener-info (comment-start-pos)
   "Return a plist describing the block comment opener at COMMENT-START-POS.
 The plist contains:
-- :content-col  Column where content begins (after delimiter and blank-space).
-- :prefix       The opener prefix string (from `pos-bol' to :content-col).
-- :text         Text after the delimiter on the opener line, or nil."
+- :prefix  The opener prefix string, from `pos-bol' to where content
+           begins (after the delimiter and blank-space).
+- :text    Text after the delimiter on the opener line, or nil."
   (declare (important-return-value t))
   (save-excursion
     (goto-char comment-start-pos)
     (skip-chars-forward "^ \t\n" (pos-eol))
     (skip-chars-forward " \t" (pos-eol))
-    (nconc (list :content-col (current-column)) (fancy-fill-paragraph--opener-prefix-and-text))))
-
-(defun fancy-fill-paragraph--block-comment-inline-closer (beg end prefix-col)
-  "Return the start of the closer line of the block comment in BEG..END, or nil.
-It is returned when the line is no wider than PREFIX-COL, the width of
-the continuation prefix (e.g. ` */' beside ` * '), so it is kept as it
-is rather than filled."
-  (declare (important-return-value t))
-  (let ((closer-bol (fancy-fill-paragraph--closer-line-bol beg end)))
-    ;; Measured in columns, as PREFIX-COL is, counted in characters a line
-    ;; indented with tabs was taken to be narrower.
-    (and closer-bol
-         (save-excursion
-           (goto-char closer-bol)
-           (end-of-line)
-           (<= (current-column) prefix-col))
-         closer-bol)))
+    (fancy-fill-paragraph--opener-prefix-and-text)))
 
 (defun fancy-fill-paragraph--closer-line-kind (closer-bol closer-end cont-prefix)
   "Return how the closer line of a comment or string is filled.
 CLOSER-BOL starts the closer line, nil when the closer is on the opener
 line, see `fancy-fill-paragraph--closer-line-bol'.  CLOSER-END follows
-the closer, nil for a string that never closes.  CONT-PREFIX is a block
-comment's continuation prefix, nil for a string.
+the closer, nil for a comment or string that never closes.  CONT-PREFIX
+is a block comment's continuation prefix, nil for a string.
 The result is one of:
 - `blocked' Code follows the closer, the closer line is never filled.
+            A string that never closes too.
+- `unclosed' A comment that never closes, its last line holding no
+            closer, filled as the others are.
 - `alone'   Only the closer is on its line, the line stays as it is.
             For a comment, text glued to the closer is kept with it
             (`bbb.*/' for e.g.), the line's only non-blank run.
@@ -2298,7 +2280,13 @@ The result is one of:
             closer on the opener line joins too."
   (declare (important-return-value t))
   (cond
-   ((or (null closer-end) (fancy-fill-paragraph--code-after-closer-p closer-end))
+   ((null closer-end)
+    (cond
+     (cont-prefix
+      'unclosed)
+     (t
+      'blocked)))
+   ((fancy-fill-paragraph--code-after-closer-p closer-end)
     'blocked)
    ((null closer-bol)
     'joins)
@@ -2323,97 +2311,20 @@ The result is one of:
    (t
     'joins)))
 
-(defun fancy-fill-paragraph--block-comment-inline-lines
-    (beg end opener-col prefix-col cont-prefix verbatim-closer-bol)
-  "Return inline block comment content lines stripped for filling.
-BEG and END are the full region bounds.  OPENER-COL is used for the
-first line, PREFIX-COL for continuation lines carrying CONT-PREFIX.
-VERBATIM-CLOSER-BOL, when non-nil, starts the closer line, which is
-excluded from the returned content."
-  (declare (important-return-value t))
-  (let ((content-end-bol (or verbatim-closer-bol (1+ (fancy-fill-paragraph--last-bol end)))))
-    (save-excursion
-      (goto-char beg)
-      (move-to-column opener-col)
-      (let ((result (list (buffer-substring-no-properties (point) (pos-eol)))))
-        (forward-line 1)
-        (while (< (point) content-end-bol)
-          (fancy-fill-paragraph--move-past-line-prefix prefix-col cont-prefix)
-          (push (buffer-substring-no-properties (point) (pos-eol)) result)
-          (forward-line 1))
-        (nreverse result)))))
-
-(defun fancy-fill-paragraph--fill-block-comment-inline
-    (beg end comment-start-pos cont-prefix opener-col closer-kind &optional closer)
-  "Fill an inline block comment in BEG..END using CONT-PREFIX.
-OPENER-COL is the column where content begins after the opener delimiter.
-CLOSER-KIND is how the closer line is filled, see
-`fancy-fill-paragraph--closer-line-kind', a closer alone on its line
-stays as it is.  CLOSER, when non-nil, is the comment's closer as a word
-of its own, held out of the fill, see
-`fancy-fill-paragraph--lines-split-closer'."
-  ;; Closing delimiters glued to the closer may follow it on its line, see
-  ;; `fancy-fill-paragraph--code-after-closer-p'.  A comment that never
-  ;; closes runs to END.
-  (unless (let ((closer-end
-                 (save-excursion
-                   (goto-char comment-start-pos)
-                   (and (forward-comment 1) (point)))))
-            (or (null closer-end)
-                (and (<= closer-end end) (< (fancy-fill-paragraph--last-bol end) closer-end))))
-    (error "Expected comment at %d to close on line ending at %d" comment-start-pos end))
-  (let* ( ;; NOTE: the prefix starts its line, as filled lines do, so it's
-         ;; measured alone.  Measured over the opener line, tabs or wide
-         ;; characters in the code before the opener gave it another width,
-         ;; cutting into the text of the lines after it.
-         (prefix-col (fancy-fill-paragraph--string-column-width cont-prefix))
-         (opener-text
-          (save-excursion
-            (goto-char beg)
-            (move-to-column opener-col)
-            (buffer-substring-no-properties beg (point))))
-         ;; NOTE: a closer alone on its line may be wider than the prefix
-         ;; (` *)' beside `|' in `pascal-mode' for e.g.), filled as text it
-         ;; would take the prefix, so it's kept too, as is a closer line
-         ;; with code after it, the code is never reflowed.
-         (verbatim-closer-bol
-          (or (fancy-fill-paragraph--block-comment-inline-closer beg end prefix-col)
-              (and (memq closer-kind '(alone blocked))
-                   (fancy-fill-paragraph--closer-line-bol beg end)))))
-    ;; A verbatim closer line is left in place, the fill ends before it.
-    (fancy-fill-paragraph--fill-prefixed-paragraph
-     (fancy-fill-paragraph--block-comment-inline-lines
-      beg end opener-col prefix-col cont-prefix verbatim-closer-bol)
-     beg
-     (cond
-      (verbatim-closer-bol
-       (1- verbatim-closer-bol))
-      (t
-       end))
-     cont-prefix
-     opener-text
-     prefix-col
-     ;; A verbatim closer line holds the closer, the lines before it don't.
-     (and (null verbatim-closer-bol) closer))))
-
 (defun fancy-fill-paragraph--fill-block-comment-region
     (beg end comment-start-pos &optional sel-beg sel-end)
   "Fill a block comment in the region BEG..END.
 COMMENT-START-POS is the buffer position of the comment opener.
 When SEL-BEG and SEL-END are non-nil, fill only body paragraphs
 overlapping that selection.  Otherwise fill the paragraph at point.
-When lines lie between the opener and closer lines, fills body
-paragraphs, text on the opener line joining the first, as is the closer
-line's text when the opener line holds only the opener.  Otherwise the
-comment is inline and fills as one paragraph, the opener line keeping
-its opener as prefix and later lines taking the continuation prefix.
-Either way a closer alone on its line (` */'), or a closer line no
-wider than the continuation prefix (` x */' beside ` * ' for e.g.),
-stays as it is, and code after the closer is never reflowed.  A closer
-joining the last paragraph is held out of the fill, put back on the
-last line when it fits, otherwise on a line of its own.
-Other text on the closer line joins the last paragraph, with the
-continuation prefix (` * text */') or without it (`   text */')."
+Fills body paragraphs, text on the opener line joining the first, the
+opener line keeping its opener as prefix and later lines taking the
+continuation prefix.  A closer line holding only the closer, such as
+` */', stays as it is, and code after the closer is never reflowed.
+Other text on the closer line joins the last paragraph (e.g.
+` * text */' or `   text */'), see
+`fancy-fill-paragraph--closer-line-kind'.  A comment that never closes
+runs to END, its last line filled as the others are."
   (let ((pos (point)))
     (save-excursion
       (comment-normalize-vars)
@@ -2424,71 +2335,37 @@ continuation prefix (` * text */') or without it (`   text */')."
              (opener-info (fancy-fill-paragraph--block-comment-opener-info comment-start-pos))
              (inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
              (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
-             ;; NOTE: on two lines, the prefix is read from the closer line,
-             ;; as a longer comment reads it from its first body line.  The
-             ;; opener line's indentation is only its leading blank-space,
-             ;; padded with spaces to the opener, so a closer line indented
-             ;; with tabs after code (Linux kernel style for e.g.) didn't
-             ;; match it, its ` *' joined as text.
-             (closer-line-body (and (null inner-body) closer-bol (cons closer-bol end)))
              (cont-prefix
               (fancy-fill-paragraph--block-comment-continuation-prefix
-               beg (or inner-body closer-line-body) closer-bol opener-col comment-start-pos))
+               beg closer-bol opener-col comment-start-pos))
              (closer-end
               (save-excursion
                 (goto-char comment-start-pos)
-                (forward-comment 1)
-                (point)))
+                (and (forward-comment 1) (point))))
              (closer-kind
-              (fancy-fill-paragraph--closer-line-kind closer-bol closer-end cont-prefix))
-             ;; NOTE: on two lines, an opener line holding only the opener
-             ;; leaves the closer line's text as the body, filled as the
-             ;; body of a longer comment of the same shape.  Filled inline,
-             ;; the opener line's code was taken for the first line's text,
-             ;; the closer line's text was joined onto the opener.
-             ;; Only a closer line joining the body has text to fill.
-             (inner-body
-              (or inner-body
-                  (and (null (plist-get opener-info :text))
-                       (eq closer-kind 'joins)
-                       closer-line-body)))
-             ;; A comment that never closes has no closer to hold out.
-             (closer
-              (fancy-fill-paragraph--closer-word
-               closer-kind
-               (save-excursion
-                 (goto-char comment-start-pos)
-                 (and (forward-comment 1) closer-end))
-               beg)))
-        (fancy-fill-paragraph--fill-syntax-region
-         beg end inner-body
-         (lambda ()
-           (fancy-fill-paragraph--fill-multiline-syntax-body
-            beg
-            inner-body
-            cont-prefix
-            (plist-get opener-info :prefix)
-            (plist-get opener-info :text)
-            (lambda (para-beg para-end para-closer)
-              (fancy-fill-paragraph--fill-block-comment-body para-beg para-end cont-prefix
-                                                             para-closer))
-            (or sel-beg pos)
-            (or sel-end pos)
-            (and (eq closer-kind 'joins) end)
-            closer))
-         (lambda ()
-           (cond
-            ;; Code after a closer on the opener line leaves no line to fill.
-            ((and (eq closer-kind 'blocked) (null closer-bol))
-             nil)
-            (t
-             (fancy-fill-paragraph--fill-block-comment-inline beg
-                                                              end
-                                                              comment-start-pos
-                                                              cont-prefix
-                                                              (plist-get opener-info :content-col)
-                                                              closer-kind
-                                                              closer)))))))))
+              (fancy-fill-paragraph--closer-line-kind closer-bol closer-end cont-prefix)))
+        ;; NOTE: the closer line is taken to be the comment's, its text joined
+        ;; to the body, so a region and comment start disagreeing (a stale
+        ;; `syntax-ppss' cache for e.g.) would fill code as comment text.
+        ;; Unlikely, but cheap to check (paranoid).
+        (unless (or (null closer-end)
+                    (and (<= closer-end end) (< (fancy-fill-paragraph--last-bol end) closer-end)))
+          (error "Expected comment at %d to close on line ending at %d" comment-start-pos end))
+        (fancy-fill-paragraph--fill-syntax-body
+         beg
+         end
+         inner-body
+         closer-bol
+         cont-prefix
+         (plist-get opener-info :prefix)
+         (plist-get opener-info :text)
+         (lambda (para-beg para-end closer)
+           (fancy-fill-paragraph--fill-block-comment-body para-beg para-end cont-prefix closer))
+         (or sel-beg pos)
+         (or sel-end pos)
+         closer-kind
+         nil
+         closer-end)))))
 
 (defun fancy-fill-paragraph--string-opener-info (opener-pos)
   "Return a plist describing the string opener at OPENER-POS.
@@ -2548,161 +2425,72 @@ syntax can be escaped, so only those newlines are checked with
 OPENER-POS is the buffer position where the string sexp begins.
 When SEL-BEG and SEL-END are non-nil, fill only body paragraphs
 overlapping that selection.  Otherwise fill the paragraph at point.
-When the delimiters occupy their own lines, fills only the body text
-between them.  When the delimiters share lines with body text (inline
-delimiters), fills the entire region, treating the delimiters as part
-of the text.  Either way a closer on a line of its own stays there,
-while text on the closer line joins the last paragraph.  A string on
-one line is only filled when its delimiter is repeated, otherwise it's
-left as it is, as is a paragraph continued with an escaped newline.
-Without a line between the opener and closer lines, code before the
-opener is kept on the first line, later lines continuing at the second
-line's indentation, an opener line holding only the opener leaving the
-closer line's text as the body."
+Fills body paragraphs, text on the opener line joining the first, later
+lines continuing it at the body's indentation.  A closer on a line of
+its own stays there, while text on the closer line joins the last
+paragraph.  A string on one line is filled when its delimiter is
+repeated, continuing at the opener line's indentation, otherwise it's
+left as it is, as is a paragraph continued with an escaped newline."
   (let* ((inner-body (fancy-fill-paragraph--comment-or-string-body-bounds beg end))
          (opener-info (fancy-fill-paragraph--string-opener-info opener-pos))
          (closer-end (fancy-fill-paragraph--string-end opener-pos))
          (closer-bol (fancy-fill-paragraph--closer-line-bol beg end))
          (closer-kind (fancy-fill-paragraph--closer-line-kind closer-bol closer-end nil))
-         (closer (fancy-fill-paragraph--closer-word closer-kind closer-end beg))
-         ;; NOTE: on two lines, an opener line holding only the opener
-         ;; leaves the closer line's text as the body, filled as the body
-         ;; of a longer string of the same shape, as for a block comment.
-         ;; Filled as prose, the closer line's text was left as it was or
-         ;; joined onto the opener, the code before the opener broken.
-         ;; Only a closer line joining the body has text to fill.
-         (inner-body
-          (or inner-body
-              (and (null (plist-get opener-info :text))
-                   (eq closer-kind 'joins)
-                   closer-bol
-                   (cons closer-bol end))))
-         (cont-prefix
-          (when (and inner-body (plist-get opener-info :text))
-            (let ((dp-match
-                   (fancy-fill-paragraph--line-dot-point-match
-                    (plist-get opener-info :text)
-                    (fancy-fill-paragraph--compile-dot-point-patterns))))
-              (fancy-fill-paragraph--string-continuation-prefix
-               (car inner-body) closer-bol closer-kind
-               (and dp-match (string-width (cdr dp-match)))
-               (fancy-fill-paragraph--string-column-width
-                (fancy-fill-paragraph--leading-indent-string (plist-get opener-info :prefix))))))))
-    (fancy-fill-paragraph--fill-syntax-region
-     beg
-     end
-     inner-body
-     (lambda ()
-       (fancy-fill-paragraph--fill-multiline-syntax-body
-        beg
-        inner-body
-        (or cont-prefix "")
-        (plist-get opener-info :prefix)
-        (plist-get opener-info :text)
-        (lambda
-          (para-beg para-end para-closer)
-          (fancy-fill-paragraph--fill-region para-beg para-end nil para-closer))
-        (or sel-beg (point))
-        (or sel-end (point))
-        (and (eq closer-kind 'joins) end)
-        closer
-        ;; NOTE: a paragraph continued with an escaped newline can't have
-        ;; its lines broken or joined without changing the string, a raw
-        ;; newline is an error in C and Python and a joined escape is
-        ;; another character.  Other paragraphs are filled.  The newline
-        ;; ending it is checked too, as the line after it may be left out
-        ;; of the fill (a closer line with code after it for e.g.).
-        (lambda (para-beg para-end)
-          (fancy-fill-paragraph--string-escaped-newline-p
-           para-beg (min (1+ para-end) (point-max))))))
-     (lambda ()
-       (cond
-        ;; NOTE: only a repeated delimiter shows a string on one line may
-        ;; span lines, breaking one opened with a single delimiter is an
-        ;; error in C and Python and changes its value in shell.  Lisp
-        ;; allows it, however the delimiter can't tell Lisp from C, so
-        ;; leave it as it is.
-        ((and (null closer-bol) (not (plist-get opener-info :repeated)))
-         nil)
-        ;; Code after the closer keeps the closer line as it is, only the
-        ;; opener line's text is filled, so this needs a closer line, a
-        ;; closer and text on the opener line.
-        ((and (eq closer-kind 'blocked)
-              (or (null closer-bol) (null closer-end) (null (plist-get opener-info :text))))
-         nil)
-        ;; Keep an escaped newline, as for the body's paragraphs above.
-        ((fancy-fill-paragraph--string-escaped-newline-p beg (min (1+ end) (point-max)))
-         nil)
-        ;; NOTE: code before the opener is kept with it as the first line's
-        ;; prefix, filled as prose it was reflowed with the text, an error in
-        ;; Python.  Later lines continue at the second line's indentation,
-        ;; the closer's when it's alone there, on one line at the opener
-        ;; line's, the string has no other line to take it from.
-        ((plist-get opener-info :text)
-         (let*
-             ((opener-prefix
-               (plist-get opener-info :prefix))
-              (opener-indent (fancy-fill-paragraph--leading-indent-string opener-prefix))
-              (indent
-               (cond
-                (closer-bol
-                 (save-excursion
-                   (goto-char closer-bol)
-                   (buffer-substring-no-properties
-                    (point)
-                    (progn
-                      (skip-chars-forward " \t" (pos-eol))
-                      (point)))))
-                (t
-                 opener-indent)))
-              ;; The second line of a dot-point hangs past its marker, the
-              ;; fill hangs it again, so the marker's width is taken off,
-              ;; unless the line is under the marker.
-              (opener-hang
-               (let ((dp-match
-                      (fancy-fill-paragraph--line-dot-point-match
-                       (plist-get opener-info :text)
-                       (fancy-fill-paragraph--compile-dot-point-patterns))))
-                 (and dp-match (string-width (cdr dp-match)))))
-              (indent
-               (cond
-                ((and closer-bol
-                      (eq closer-kind 'joins) opener-hang
-                      (string-suffix-p (make-string opener-hang ?\s) indent)
-                      (<= (+ (fancy-fill-paragraph--string-column-width opener-indent) opener-hang)
-                          (fancy-fill-paragraph--string-column-width indent)))
-                 (substring indent 0 (- opener-hang)))
-                (t
-                 indent)))
-              ;; The second line is stripped of the indentation alone, a
-              ;; dot-point's hang past it is kept for the fill.
-              (lines
-               (cons
-                (plist-get opener-info :text)
-                (and closer-bol
-                     (eq closer-kind 'joins)
-                     (list
-                      (save-excursion
-                        (goto-char closer-bol)
-                        (move-to-column (fancy-fill-paragraph--string-column-width indent))
-                        (buffer-substring-no-properties (point) (pos-eol))))))))
-           (fancy-fill-paragraph--fill-prefixed-paragraph
-            lines
-            beg
-            (cond
-             ((memq closer-kind '(alone blocked))
-              (1- closer-bol))
-             (t
-              end))
-            indent
-            opener-prefix
-            (fancy-fill-paragraph--string-column-width indent)
-            closer)))
-        ((eq closer-kind 'alone)
-         (fancy-fill-paragraph--fill-region beg (1- closer-bol)))
-        (t
-         (fancy-fill-paragraph--fill-region beg end nil closer))))
-     (plist-get opener-info :text))))
+         (opener-indent
+          (save-excursion
+            (goto-char beg)
+            (skip-chars-forward " \t" end)
+            (buffer-substring-no-properties beg (point)))))
+    (cond
+     ;; NOTE: only a repeated delimiter shows a string on one line may span
+     ;; lines, breaking one opened with a single delimiter is an error in C
+     ;; and Python and changes its value in shell.  Lisp allows it, however
+     ;; the delimiter can't tell Lisp from C, so leave it as it is.
+     ((and (null closer-bol) (not (plist-get opener-info :repeated)))
+      nil)
+     (t
+      (let ((cont-prefix
+             (cond
+              ;; NOTE: a string on one line has no line after the opener to
+              ;; take the continuation's indentation from, so the opener
+              ;; line's is used, as a prose fill would.
+              ((null closer-bol)
+               opener-indent)
+              (t
+               (let* ((text (plist-get opener-info :text))
+                      (dp-match
+                       (and text
+                            (fancy-fill-paragraph--line-dot-point-match
+                             text (fancy-fill-paragraph--compile-dot-point-patterns)))))
+                 (or (and text
+                          (fancy-fill-paragraph--string-continuation-prefix
+                           (or (car inner-body) closer-bol) closer-bol closer-kind
+                           (and dp-match (string-width (cdr dp-match)))
+                           (fancy-fill-paragraph--string-column-width opener-indent)))
+                     ""))))))
+        (fancy-fill-paragraph--fill-syntax-body
+         beg
+         end
+         inner-body
+         closer-bol
+         cont-prefix
+         (plist-get opener-info :prefix)
+         (plist-get opener-info :text)
+         (lambda (para-beg para-end closer)
+           (fancy-fill-paragraph--fill-region para-beg para-end nil closer))
+         (or sel-beg (point))
+         (or sel-end (point))
+         closer-kind
+         ;; NOTE: a paragraph continued with an escaped newline can't have
+         ;; its lines broken or joined without changing the string, a raw
+         ;; newline is an error in C and Python and a joined escape is
+         ;; another character.  Other paragraphs are filled.  The newline
+         ;; ending it is checked too, as the line after it may be left out
+         ;; of the fill (a closer line with code after it for e.g.).
+         (lambda (para-beg para-end)
+           (fancy-fill-paragraph--string-escaped-newline-p
+            para-beg (min (1+ para-end) (point-max))))
+         closer-end))))))
 
 (defun fancy-fill-paragraph--replace-region (beg end result)
   "Replace the region BEG..END with RESULT when it differs.

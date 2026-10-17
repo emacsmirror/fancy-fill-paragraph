@@ -886,6 +886,20 @@ it."
         (should (fancy-fill-paragraph))
         (should (equal text-expected (buffer-string)))))))
 
+(ert-deftest fill-syntax-bounds-block-comment-paragraph-at-eob-without-newline-fills ()
+  "A block comment paragraph ending a file without a trailing newline fills.
+A comment being typed is the same.  Preservation cases."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (fill-column 12)
+        (sentence-end-double-space nil))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (should-fill-same-from-every-position
+         "/* aaa\n\n   bbb ccc ddd */" 2 "/* aaa\n\n   bbb ccc\n   ddd */")
+        (should-fill-same-from-every-position
+         "int x;\n/* aaa bbb\n\nccc ddd eee fff" 3 "int x;\n/* aaa bbb\n\nccc ddd eee\nfff")))))
+
 (ert-deftest fill-syntax-bounds-code-beside-comment-at-eob-untouched ()
   "Code beside a comment running to end-of-buffer must not be reflowed.
 Same shape as a comment filling the whole paragraph, only the code
@@ -6779,6 +6793,23 @@ a dot-point."
          0
          "/* Some intro text:\n * * first item\n * * second item. */\n")))))
 
+(ert-deftest fill-syntax-bounds-block-comment-closer-line-text-joins ()
+  "Text on a closer line joins the last paragraph, with the prefix or without.
+Preservation cases."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 40))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  (list 0 "/* aaa bbb\n * ccc */\n" "/* aaa bbb ccc */\n")
+                  (list 2 "/* Aaa.\n\n   Bbb ccc\n   ddd. */\n" "/* Aaa.\n\n   Bbb ccc ddd. */\n")
+                  (list
+                   2 "/* Aaa.\n\n   Bbb ccc.\n   *ddd* */\n" "/* Aaa.\n\n   Bbb ccc. *ddd* */\n")))
+          (should-fill-same-from-every-position (nth 1 case) (nth 0 case) (nth 2 case)))))))
+
 (ert-deftest fill-syntax-bounds-block-comment-wrapped-closer-alone ()
   "A closer wrapped onto a line of its own is laid out as a closer alone.
 Joined to the last paragraph, the closer was filled as a word, so when
@@ -6924,6 +6955,26 @@ The last case was found in practice."
             (should-fill-same-from-every-position (nth 3 case) 0 (nth 4 case))
             (should-fill-selection (nth 3 case) 0 (nth 4 case))))))))
 
+(ert-deftest fill-syntax-bounds-block-comment-empty-unchanged ()
+  "A block comment without text is left as it is, there's nothing to fill.
+A comment already spanning lines is included for contrast.
+Preservation cases."
+  (let ((fancy-fill-paragraph-syntax-bounds t))
+    (dolist (case
+             (list
+              (list #'c-mode "/* */\n")
+              (list #'c-mode "/*  */\n")
+              (list #'c-mode "int x; /* */\n")
+              (list #'c-mode "int x; /* */\nint y;\n")
+              (list #'pascal-mode "(* *)\n")
+              (list #'lisp-mode "#| |#\n")
+              ;; Preservation: already spanning lines.
+              (list #'c-mode "/*\n */\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t))
+          (should-fill-same-from-every-position (nth 1 case) 0 (nth 1 case)))))))
+
 (ert-deftest fill-syntax-bounds-closer-after-abbreviation ()
   "A closer after a dotted abbreviation keeps a single space before it.
 A double space typed before the closer was kept, it's collapsed as
@@ -6951,6 +7002,31 @@ is still doubled."
         (let ((inhibit-message t)
               (fill-column 70))
           (should-fill-same-from-every-position (nth 2 case) (nth 1 case) (nth 3 case)))))))
+
+(ert-deftest fill-syntax-bounds-closer-after-tab-part-of-word ()
+  "A closer after a tab is part of the word before it, as a tab is in the text.
+The tab is kept after a dotted abbreviation or a sentence end, wrapping
+with the word.  Preservation cases."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space t))
+    (dolist (case
+             (list
+              (list #'c-mode 70 0 "/* Use U.S.\t*/\n" "/* Use U.S.\t*/\n")
+              (list #'c-mode 70 0 "/* End.\t*/\n" "/* End.\t*/\n")
+              (list #'c-mode 70 0 "/* Aaa bbb\n * use U.S.\t*/\n" "/* Aaa bbb use U.S.\t*/\n")
+              (list
+               #'python-mode
+               70
+               3
+               "def f():\n    \"\"\"Aaa.\n\n    Bbb\n    use U.S.\t\"\"\"\n"
+               "def f():\n    \"\"\"Aaa.\n\n    Bbb use U.S.\t\"\"\"\n")
+              ;; Wrapped with the word before it.
+              (list #'c-mode 20 0 "/* aaa bbb ccc ddd\t*/\n" "/* aaa bbb ccc\n * ddd\t*/\n")))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column (nth 1 case)))
+          (should-fill-same-from-every-position (nth 3 case) (nth 2 case) (nth 4 case)))))))
 
 (ert-deftest fill-syntax-bounds-closer-alone-takes-prefix ()
   "A closer on a line of its own takes the continuation prefix.
