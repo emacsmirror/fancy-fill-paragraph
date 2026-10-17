@@ -91,6 +91,9 @@ Each entry is one of:
   is the prefix.  For example (:regexp . \"[0-9]+\\\\. \") detects
   numbered lists like \"1. \", \"10. \", \"123. \".
 
+Both kinds are matched as regexps, case is given no special handling,
+following `case-fold-search'.
+
 Set to nil to disable dot-point detection entirely."
   :type
   '(repeat (choice (string :tag "Literal")
@@ -3039,20 +3042,19 @@ Uses dynamic programming to minimize raggedness."
 
 (defun fancy-fill-paragraph--compile-dot-point-patterns ()
   "Build compiled matchers for dot-point prefix handling.
-Each result entry is a plist with line-matching and item-prefix checks
-so line detection and false-dot-point prevention share one definition."
+Each result entry is a (LINE-REGEXP . ITEM-REGEXP) cons, so line
+detection and false-dot-point prevention share one definition.  A
+literal prefix is quoted into a regexp, so both kinds match alike."
   (declare (important-return-value t))
   (mapcar
    (lambda (dp)
-     (cond
-      ((stringp dp)
-       (list :line-type 'literal :line-value dp :item-type 'literal :item-value dp))
-      (t
-       (list
-        :line-type 'regexp
-        :line-value (concat "\\`\\([ \t]*\\)\\(" (cdr dp) "\\)")
-        :item-type 'regexp
-        :item-value (concat "\\`" (cdr dp))))))
+     (let ((pattern
+            (cond
+             ((stringp dp)
+              (regexp-quote dp))
+             (t
+              (cdr dp)))))
+       (cons (concat "\\`\\([ \t]*\\)\\(" pattern "\\)") (concat "\\`" pattern))))
    fancy-fill-paragraph-dot-point-prefix))
 
 (defun fancy-fill-paragraph--line-dot-point-match (line dot-points)
@@ -3067,21 +3069,9 @@ line for one."
   (let ((result nil)
         (entries-remaining dot-points))
     (while (and entries-remaining (null result))
-      (let ((entry (car entries-remaining)))
-        (cond
-         ((eq (plist-get entry :line-type) 'literal)
-          ;; Literal: check leading blank-space then prefix.
-          (let* ((prefix (plist-get entry :line-value))
-                 (indent (fancy-fill-paragraph--leading-indent line)))
-            (when (and (< 0 (length prefix))
-                       (eq
-                        t (compare-strings prefix 0 nil line indent (+ indent (length prefix)))))
-              (setq result (cons indent prefix)))))
-         (t
-          ;; Regexp: match and extract prefix from group 2.
-          (when (and (string-match (plist-get entry :line-value) line)
-                     (< (match-beginning 2) (match-end 2)))
-            (setq result (cons (- (match-end 1) (match-beginning 1)) (match-string 2 line)))))))
+      (when (and (string-match (car (car entries-remaining)) line)
+                 (< (match-beginning 2) (match-end 2)))
+        (setq result (cons (- (match-end 1) (match-beginning 1)) (match-string 2 line))))
       (setq entries-remaining (cdr entries-remaining)))
     result))
 
@@ -3095,15 +3085,8 @@ An empty match is no dot-point, see
         (result nil)
         (entries-remaining dot-points))
     (while (and entries-remaining (null result))
-      (let ((entry (car entries-remaining)))
-        (setq result
-              (cond
-               ((eq (plist-get entry :item-type) 'literal)
-                (let ((prefix (plist-get entry :item-value)))
-                  (and (< 0 (length prefix)) (string-prefix-p prefix item-with-space))))
-               (t
-                (and (string-match (plist-get entry :item-value) item-with-space)
-                     (< 0 (match-end 0)))))))
+      (setq result
+            (and (string-match (cdr (car entries-remaining)) item-with-space) (< 0 (match-end 0))))
       (setq entries-remaining (cdr entries-remaining)))
     result))
 

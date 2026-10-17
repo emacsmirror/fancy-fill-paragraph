@@ -4347,6 +4347,98 @@ Lines sharing their indentation fill as before."
       (fancy-fill-paragraph)
       (should (equal text-expected (buffer-string))))))
 
+(ert-deftest fill-dot-point-literal-prefix-case-fold ()
+  "A literal dot-point prefix follows `case-fold-search', as a regexp does.
+It was compared case-sensitively, so with the default `case-fold-search'
+an \"O \" item wasn't taken for an \"o \" one.  Each case is (PREFIXES
+CASE-FOLD-SEARCH FILL-COLUMN TEXT EXPECTED)."
+  (let ((sentence-end-double-space nil))
+    (dolist (case
+             (list
+              ;; An item starts with a prefix in another case.
+              (list
+               (list "o ")
+               t
+               20
+               "O aaa bbb ccc ddd eee fff\nO ggg hhh\n"
+               "O aaa bbb ccc ddd\n  eee fff\nO ggg hhh\n")
+              (list
+               (list "No. ")
+               t
+               20
+               "no. aaa bbb ccc ddd eee fff\nNO. ggg hhh\n"
+               "no. aaa bbb ccc ddd\n    eee fff\nNO. ggg hhh\n")
+              (list
+               (list "[x] ")
+               t
+               20
+               "[X] aaa bbb ccc ddd eee\n[x] ggg hhh\n"
+               "[X] aaa bbb ccc ddd\n    eee\n[x] ggg hhh\n")
+              ;; A word matching a prefix in another case doesn't start a line.
+              (list (list "o ") t 12 "aaa bbb ccc O ddd eee\n" "aaa bbb\nccc O ddd\neee\n")
+
+              ;; Unchanged: case is kept apart without `case-fold-search'.
+              (list
+               (list "o ")
+               nil
+               20
+               "O aaa bbb ccc ddd eee fff\nO ggg hhh\n"
+               "O aaa bbb ccc ddd\neee fff O ggg hhh\n")
+              (list (list "o ") nil 12 "aaa bbb ccc O ddd eee\n" "aaa bbb ccc\nO ddd eee\n")
+              ;; Unchanged: a prefix in the same case.
+              (list
+               (list "o ")
+               t
+               20
+               "o aaa bbb ccc ddd eee fff\no ggg hhh\n"
+               "o aaa bbb ccc ddd\n  eee fff\no ggg hhh\n")
+              (list
+               (list "o ")
+               nil
+               20
+               "o aaa bbb ccc ddd eee fff\no ggg hhh\n"
+               "o aaa bbb ccc ddd\n  eee fff\no ggg hhh\n")
+              ;; Unchanged: regexp characters in a prefix match only themselves.
+              (list
+               (list "1. ")
+               t
+               20
+               "1. aaa bbb ccc ddd eee fff\n1. ggg hhh\n"
+               "1. aaa bbb ccc ddd\n   eee fff\n1. ggg hhh\n")
+              (list
+               (list "1. ")
+               t
+               20
+               "1x aaa bbb ccc ddd eee fff\n1x ggg hhh\n"
+               "1x aaa bbb ccc ddd\neee fff 1x ggg hhh\n")
+              (list (list "1. ") t 12 "aaa bbb ccc 1x ddd eee\n" "aaa bbb ccc\n1x ddd eee\n")
+              (list
+               (list "+ ")
+               t
+               20
+               "+ aaa bbb ccc ddd eee fff\n+ ggg hhh\n"
+               "+ aaa bbb ccc ddd\n  eee fff\n+ ggg hhh\n")
+              (list
+               (list "+ ")
+               t
+               20
+               "++ aaa bbb ccc ddd eee fff\n+ ggg hhh\n"
+               "++ aaa bbb ccc ddd\neee fff\n+ ggg hhh\n")
+              ;; Unchanged: the default prefixes, which have no letters.
+              (list
+               (list "- " "* ")
+               t
+               20
+               "- aaa bbb ccc ddd eee fff\n* ggg hhh\n"
+               "- aaa bbb ccc ddd\n  eee fff\n* ggg hhh\n")))
+      (let ((fancy-fill-paragraph-dot-point-prefix (nth 0 case))
+            (fill-column (nth 2 case)))
+        (with-fancy-fill-paragraph-test (nth 3 case)
+          (setq-local case-fold-search (nth 1 case))
+          (goto-char (point-min))
+          (fancy-fill-paragraph)
+          (should (equal (nth 4 case) (buffer-string))))))))
+
 
 ;; ---------------------------------------------------------------------------
 ;; Oversized Word Test
