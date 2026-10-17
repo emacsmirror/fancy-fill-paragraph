@@ -2181,7 +2181,11 @@ PARA-KEEP-FN, when non-nil, is called as (PARA-KEEP-FN PARA-BEG PARA-END)
 for each paragraph, which is left as it is when it returns non-nil.
 Returns non-nil when the buffer was modified."
   (declare (important-return-value t))
-  (let* ((prefix-col (fancy-fill-paragraph--prefix-column-width (car inner-body) cont-prefix))
+  (let* ( ;; NOTE: the prefix starts its line, as filled lines do, so it's
+         ;; measured alone.  Measured on the first body line, a line not
+         ;; starting with the prefix (blank-space or text indented with a
+         ;; tab for e.g.) gave another width.
+         (prefix-col (fancy-fill-paragraph--string-column-width cont-prefix))
          ;; Widen body to include the opener line when it carries text,
          ;; so paragraph detection sees it as part of the first paragraph.
          ;; The closer line is taken in likewise, as the inline fill does,
@@ -2211,7 +2215,7 @@ Returns non-nil when the buffer was modified."
           ((and opener-text (= para-beg beg))
            (fancy-fill-paragraph--fill-prefixed-region
             (car inner-body) para-end cont-prefix
-            opener-prefix opener-text beg nil para-closer))
+            opener-prefix opener-text beg prefix-col para-closer))
           (t
            (funcall para-fill-fn para-beg para-end para-closer)))))
      cont-prefix)))

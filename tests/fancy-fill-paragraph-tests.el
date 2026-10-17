@@ -7089,6 +7089,102 @@ short, filling it again moved it.  Each result also fills unchanged."
             (should-fill-same-from-every-position (nth 1 case) 0 (nth 2 case))
             (should-fill-same-from-every-position (nth 2 case) 0 (nth 2 case))))))))
 
+(ert-deftest fill-syntax-bounds-block-comment-prefix-width-on-blank-line ()
+  "A prefix is as wide as itself when the first body line is blank.
+It was measured on that line, the part past the line's end with
+`string-width', counting spaces before a tab on top of it.  So the
+opener's paragraph wrapped short.  A prefix of tabs alone, or a first
+body line holding the prefix, fills as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil)
+        (fill-column 34))
+    (with-temp-buffer
+      (c-mode)
+      (let ((inhibit-message t))
+        (dolist (case
+                 (list
+                  ;; Spaces before a tab indenting the opener line.
+                  (list
+                   "  \tfoo(); /* aaa bbb ccc ddd eee fff ggg hhh\n\n  \t        * iii */\n"
+                   (concat
+                    "  \tfoo(); /* aaa bbb ccc ddd\n  \t        * eee fff ggg hhh\n"
+                    "\n  \t        * iii */\n"))
+                  ;; Preservation: the first body line holds the prefix.
+                  (list
+                   (concat
+                    "  \tfoo(); /* aaa bbb ccc ddd eee fff ggg hhh\n"
+                    "  \t        * iii\n\n  \t        * jjj */\n")
+                   (concat
+                    "  \tfoo(); /* aaa bbb ccc ddd\n  \t        * eee fff ggg hhh\n"
+                    "  \t        * iii\n\n  \t        * jjj */\n"))
+                  ;; Preservation: tabs alone.
+                  (list
+                   "\tfoo();\t/* aaa bbb ccc ddd eee fff ggg hhh\n\n\t\t * iii */\n"
+                   "\tfoo();\t/* aaa bbb ccc ddd\n\t\t * eee fff ggg hhh\n\n\t\t * iii */\n")))
+          ;; A selection leaves a comment after code alone, so only the cursor.
+          (should-fill-same-from-every-position (nth 0 case) 0 (nth 1 case)))))))
+
+(ert-deftest fill-syntax-bounds-prefix-width-past-blank-space-line ()
+  "A prefix is as wide as itself, whatever the first body line holds.
+It was measured on the first body line, read from the first non-blank
+line.  So blank-space on the first that isn't the start of the prefix
+\(auto-indent leftovers for e.g.) gave another width, wrapping too wide
+or too short, a second fill changing it.  The line is kept as it is.
+Text on it indented with a tab gave another width too.
+A first body line holding the start of the prefix fills as before."
+  (let ((fancy-fill-paragraph-syntax-bounds t)
+        (sentence-end-double-space nil))
+    (dolist (case
+             (list
+              (list
+               #'c-mode
+               34
+               "\tfoo();\t/* aaa bbb ccc ddd eee fff ggg hhh iii jjj\n        \n\t\t * kkk */\n"
+               (concat
+                "\tfoo();\t/* aaa bbb ccc ddd\n\t\t * eee fff ggg hhh\n\t\t * iii jjj\n"
+                "        \n\t\t * kkk */\n"))
+              (list
+               #'c-mode
+               40
+               "\tfoo();\t/* aaa bbb ccc ddd eee fff ggg hhh iii jjj\n\t\t\t\n\t\t * kkk */\n"
+               (concat
+                "\tfoo();\t/* aaa bbb ccc ddd eee\n\t\t * fff ggg hhh iii jjj\n"
+                "\t\t\t\n\t\t * kkk */\n"))
+              (list
+               #'python-mode 30
+               (concat
+                "def f():\n    \"\"\"Aaa bbb ccc ddd eee fff ggg hhh iii.\n"
+                "\t\t\t\n    jjj.\n    \"\"\"\n")
+               (concat
+                "def f():\n    \"\"\"Aaa bbb ccc ddd eee fff\n    ggg hhh iii.\n"
+                "\t\t\t\n    jjj.\n    \"\"\"\n"))
+              ;; Text indented with a tab under a prefix of spaces.
+              (list
+               #'c-mode
+               30
+               "/* aaa bbb ccc ddd eee fff ggg hhh\n\tiii jjj kkk lll mmm nnn\n */\n"
+               "/* aaa bbb ccc ddd eee fff ggg\n * hhh iii jjj kkk lll mmm nnn\n */\n")
+              ;; Preservation: the start of the prefix.
+              (list
+               #'c-mode
+               34
+               "\tfoo();\t/* aaa bbb ccc ddd eee fff ggg hhh iii jjj\n\t\t\n\t\t * kkk */\n"
+               (concat
+                "\tfoo();\t/* aaa bbb ccc ddd\n\t\t * eee fff ggg hhh\n\t\t * iii jjj\n"
+                "\t\t\n\t\t * kkk */\n"))))
+      (with-temp-buffer
+        (funcall (nth 0 case))
+        (let ((inhibit-message t)
+              (fill-column (nth 1 case)))
+          (should-fill-same-from-every-position
+           (nth 2 case)
+           (cond
+            ((eq (nth 0 case) #'python-mode)
+             1)
+            (t
+             0))
+           (nth 3 case)))))))
+
 (ert-deftest fill-syntax-bounds-prefix-width-tab-width-zero ()
   "A prefix holding a tab is measured with a `tab-width' of zero as eight.
 Emacs lays out a tab with a `tab-width' of zero as eight columns."
